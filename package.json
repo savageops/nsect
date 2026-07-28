@@ -1,5 +1,5 @@
 {
-  "name": "nsect",
+  "name": "@savagejay/nsect",
   "version": "1.0.0",
   "description": "Programmable web retrieval for AI products — stealth browser engine, multi-engine search, YouTube transcripts, challenge bypass, and DOM-scored extraction. CLI, HTTP API, and MCP server.",
   "type": "module",
