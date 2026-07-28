@@ -1,9 +1,58 @@
 {
   "name": "nsect",
   "version": "1.0.0",
-  "description": "Nsect crawler with fingerprint randomization - CLI, API server, and MCP server",
+  "description": "Programmable web retrieval for AI products — stealth browser engine, multi-engine search, YouTube transcripts, challenge bypass, and DOM-scored extraction. CLI, HTTP API, and MCP server.",
   "type": "module",
   "main": "nsect-engine.js",
+  "bin": {
+    "nsect": "nsect-engine.js"
+  },
+  "files": [
+    "nsect-engine.js",
+    "api.js",
+    "server/",
+    "packages/mcp/index.js",
+    "packages/mcp/api-client.js",
+    "packages/mcp/package.json",
+    "scripts/save-transcript.mjs",
+    "scripts/harvest-search.mjs",
+    "vitest.config.js"
+  ],
+  "keywords": [
+    "web-scraping",
+    "crawler",
+    "scraper",
+    "headless-browser",
+    "puppeteer",
+    "stealth",
+    "anti-bot",
+    "cloudflare-bypass",
+    "serp",
+    "search",
+    "youtube-transcript",
+    "mcp",
+    "llm",
+    "rag",
+    "content-extraction",
+    "markdown"
+  ],
+  "author": "Savage <savagejayog@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/savageops/nsect",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/savageops/nsect.git"
+  },
+  "bugs": {
+    "url": "https://github.com/savageops/nsect/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "engine": "node nsect-engine.js",
     "server": "node api.js",
