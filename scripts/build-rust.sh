@@ -7,4 +7,4 @@ RUST_ROOT="${REPO_ROOT}/rust"
 
 cd "${RUST_ROOT}"
 cargo build --release
-echo "Built artifact: ${RUST_ROOT}/target/release/insect-rs"
+echo "Built artifact: ${RUST_ROOT}/target/release/nsect-rs"

@@ -13,6 +13,30 @@ use reqwest::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::{process::Command, time::timeout};
+
+// Compiled-once transcript regexes. Previously recompiled on every request
+// (point 8); caching them in LazyLock eliminates per-call compilation cost.
+static LANG_RE: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"^[a-z]{2,3}(-[a-z0-9]{2,8})?$").expect("language regex"));
+static HEX_ENTITY_RE: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"&#x([a-fA-F0-9]+);").expect("hex entity regex"));
+static DEC_ENTITY_RE: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"&#([0-9]+);").expect("dec entity regex"));
+static INNERTUBE_KEY_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(r#""INNERTUBE_API_KEY":"([^"]+)""#).expect("innertube key regex")
+});
+static INNERTUBE_VERSION_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(r#""INNERTUBE_CONTEXT_CLIENT_VERSION":"([^"]+)""#)
+        .expect("innertube version regex")
+});
+static XML_TEXT_RE: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r#"(?is)<text\b([^>]*)>(.*?)</text>"#).expect("xml transcript regex"));
+static XML_START_RE: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r#"start="([^"]+)""#).expect("xml start regex"));
+static XML_DURATION_RE: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r#"dur="([^"]+)""#).expect("xml duration regex"));
+static STRIP_HTML_RE: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"(?is)<[^>]+>").expect("strip html regex"));
 use url::Url;
 
 use crate::AppState;
@@ -23,8 +47,8 @@ const MAX_TIMEOUT_SECONDS: u64 = 120;
 const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 pub const YOUTUBE_TRANSCRIPT_METHODS: [&str; 5] = [
-    "insect_native",
-    "insect_signal",
+    "nsect_native",
+    "nsect_signal",
     "invidious",
     "piped",
     "yt_dlp",
@@ -243,8 +267,8 @@ pub async fn fetch_youtube_transcript(
     for method in &request.methods {
         let method_started_at = Instant::now();
         let outcome = match method.as_str() {
-            "insect_native" => run_insect_native_method(&request, &mut context).await,
-            "insect_signal" => run_insect_signal_method(&request, &mut context).await,
+            "nsect_native" => run_nsect_native_method(&request, &mut context).await,
+            "nsect_signal" => run_nsect_signal_method(&request, &mut context).await,
             "invidious" => run_invidious_method(&request, &mut context).await,
             "piped" => run_piped_method(&request, &mut context).await,
             "yt_dlp" => run_yt_dlp_method(&request, &mut context).await,
@@ -392,8 +416,7 @@ fn normalize_language(value: Option<&str>) -> Result<String, TranscriptValidatio
     let language = normalize_optional_string(value)
         .unwrap_or_else(|| "en".to_string())
         .to_lowercase();
-    let re = Regex::new(r"^[a-z]{2,3}(-[a-z0-9]{2,8})?$").expect("language regex");
-    if !re.is_match(&language) {
+    if !LANG_RE.is_match(&language) {
         return Err(TranscriptValidationError::new(
             "'language' must be an IETF language tag like en or en-US",
             "language",
@@ -525,17 +548,14 @@ fn normalize_segment_text(input: &str) -> String {
 }
 
 fn decode_entities(input: &str) -> String {
-    let numeric_hex = Regex::new(r"&#x([a-fA-F0-9]+);").expect("hex entity regex");
-    let numeric_dec = Regex::new(r"&#([0-9]+);").expect("dec entity regex");
-
-    let with_hex = numeric_hex.replace_all(input, |captures: &regex::Captures<'_>| {
+    let with_hex = HEX_ENTITY_RE.replace_all(input, |captures: &regex::Captures<'_>| {
         let value = u32::from_str_radix(&captures[1], 16)
             .ok()
             .and_then(char::from_u32)
             .unwrap_or('?');
         value.to_string()
     });
-    let with_numbers = numeric_dec.replace_all(&with_hex, |captures: &regex::Captures<'_>| {
+    let with_numbers = DEC_ENTITY_RE.replace_all(&with_hex, |captures: &regex::Captures<'_>| {
         let value = captures[1]
             .parse::<u32>()
             .ok()
@@ -585,7 +605,7 @@ fn format_elapsed(duration: Duration) -> String {
     format!("{:.2}", duration.as_secs_f64())
 }
 
-async fn run_insect_native_method(
+async fn run_nsect_native_method(
     request: &TranscriptRequest,
     context: &mut TranscriptContext,
 ) -> Result<AdapterOutput> {
@@ -614,7 +634,7 @@ async fn run_insect_native_method(
     })
 }
 
-async fn run_insect_signal_method(
+async fn run_nsect_signal_method(
     request: &TranscriptRequest,
     context: &mut TranscriptContext,
 ) -> Result<AdapterOutput> {
@@ -960,11 +980,8 @@ fn extract_player_response_from_watch_page(html: &str) -> Option<Value> {
 }
 
 fn extract_innertube_config(html: &str) -> Option<(String, String)> {
-    let key_re = Regex::new(r#""INNERTUBE_API_KEY":"([^"]+)""#).expect("innertube key regex");
-    let version_re = Regex::new(r#""INNERTUBE_CONTEXT_CLIENT_VERSION":"([^"]+)""#)
-        .expect("innertube version regex");
-    let api_key = key_re.captures(html)?.get(1)?.as_str().to_string();
-    let client_version = version_re
+    let api_key = INNERTUBE_KEY_RE.captures(html)?.get(1)?.as_str().to_string();
+    let client_version = INNERTUBE_VERSION_RE
         .captures(html)
         .and_then(|caps| caps.get(1).map(|value| value.as_str().to_string()))
         .unwrap_or_else(|| "2.20240101.00.00".to_string());
@@ -1249,12 +1266,8 @@ fn parse_json3_transcript(body: &str) -> Result<Vec<TranscriptSegment>> {
 }
 
 fn parse_xml_transcript(body: &str) -> Vec<TranscriptSegment> {
-    let text_re = Regex::new(r#"(?is)<text\b([^>]*)>(.*?)</text>"#).expect("xml transcript regex");
-    let start_re = Regex::new(r#"start="([^"]+)""#).expect("xml start regex");
-    let duration_re = Regex::new(r#"dur="([^"]+)""#).expect("xml duration regex");
-
     let mut segments = Vec::new();
-    for capture in text_re.captures_iter(body) {
+    for capture in XML_TEXT_RE.captures_iter(body) {
         let attrs = capture
             .get(1)
             .map(|value| value.as_str())
@@ -1263,11 +1276,11 @@ fn parse_xml_transcript(body: &str) -> Vec<TranscriptSegment> {
             .get(2)
             .map(|value| value.as_str())
             .unwrap_or_default();
-        let start = start_re
+        let start = XML_START_RE
             .captures(attrs)
             .and_then(|caps| caps.get(1))
             .and_then(|value| value.as_str().parse::<f64>().ok());
-        let duration = duration_re
+        let duration = XML_DURATION_RE
             .captures(attrs)
             .and_then(|caps| caps.get(1))
             .and_then(|value| value.as_str().parse::<f64>().ok());
@@ -1421,8 +1434,7 @@ fn parse_timestamp_to_seconds(value: &str) -> Option<f64> {
 }
 
 fn strip_html_tags(value: &str) -> String {
-    let re = Regex::new(r"(?is)<[^>]+>").expect("strip html regex");
-    re.replace_all(value, "").to_string()
+    STRIP_HTML_RE.replace_all(value, "").to_string()
 }
 
 async fn fetch_text(

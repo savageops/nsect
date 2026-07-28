@@ -1,27 +1,43 @@
 const DEFAULT_API_BASE = "http://localhost:3000";
 
+/**
+ * Read MCP client config from the environment. The API key is OPTIONAL: in
+ * local mode (default) the server runs keyless, so no key is needed. In hosted
+ * mode the operator sets NSECT_API_KEY. The key, when present, is sent as the
+ * x-api-key header; when absent the header is omitted and the server decides
+ * whether to admit the request based on its own mode.
+ *
+ * @param {NodeJS.ProcessEnv} env
+ */
 export function readMcpConfig(env = process.env) {
   const apiBase = (
-    env.INSECT_API_URL
+    env.NSECT_API_URL
     || DEFAULT_API_BASE
   ).trim();
-  const apiKey = (env.INSECT_API_KEY || "").trim();
+  const apiKey = (env.NSECT_API_KEY || "").trim();
   return { apiBase, apiKey };
 }
 
 export const MCP_CONFIG_EXAMPLE = {
   mcpServers: {
-    insect: {
+    nsect: {
       command: "node",
       args: ["./packages/mcp/index.js"],
       env: {
-        INSECT_API_KEY: "sk_your_key_here",
-        INSECT_API_URL: "http://localhost:3000",
+        // Optional in local mode; required when the server runs hosted.
+        NSECT_API_KEY: "sk_your_key_here",
+        NSECT_API_URL: "http://localhost:3000",
       },
     },
   },
 };
 
+/**
+ * Create an API client. The apiKey is optional — omitted entirely when the
+ * target server runs in local (keyless) mode.
+ *
+ * @param {{ apiBase: string, apiKey?: string, fetchImpl?: typeof fetch, timeoutMs?: number }} opts
+ */
 export function createApiClient({
   apiBase,
   apiKey,
@@ -30,9 +46,6 @@ export function createApiClient({
 } = {}) {
   if (!apiBase) {
     throw new Error("apiBase is required");
-  }
-  if (!apiKey) {
-    throw new Error("apiKey is required");
   }
 
   async function postJson(endpoint, body) {
@@ -43,12 +56,15 @@ export function createApiClient({
     let responseText = "";
 
     try {
+      /** @type {Record<string, string>} */
+      const headers = { "Content-Type": "application/json" };
+      // Only attach the key when one is configured (local mode = keyless).
+      if (apiKey) {
+        headers["x-api-key"] = apiKey;
+      }
       response = await fetchImpl(`${apiBase}${endpoint}`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-        },
+        headers,
         body: JSON.stringify(body),
         signal: controller.signal,
       });

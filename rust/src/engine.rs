@@ -30,8 +30,13 @@ use crate::{
 #[derive(Debug, Clone, Serialize)]
 pub struct EngineResponse {
     pub success: bool,
+    /// Unified envelope: string for text/html/markdown, parsed object/array for
+    /// json/links. Serialized naturally by serde — callers check `format` to
+    /// know which type to expect.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub output: Option<String>,
+    pub output: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<EngineMeta>,
     #[serde(rename = "errorCode", skip_serializing_if = "Option::is_none")]
@@ -133,13 +138,13 @@ struct SearchState {
     attempts: Vec<SearchAttempt>,
 }
 
-pub async fn run_insect_engine(params: NormalizedEngineRequest) -> EngineResponse {
-    tokio::task::spawn_blocking(move || run_insect_engine_blocking(params))
+pub async fn run_nsect_engine(params: NormalizedEngineRequest) -> EngineResponse {
+    tokio::task::spawn_blocking(move || run_nsect_engine_blocking(params))
         .await
         .unwrap_or_else(|error| upstream_error(&format!("Engine task join failed: {error}")))
 }
 
-fn run_insect_engine_blocking(params: NormalizedEngineRequest) -> EngineResponse {
+fn run_nsect_engine_blocking(params: NormalizedEngineRequest) -> EngineResponse {
     let fingerprint = generate_fingerprint();
     let started_at = Instant::now();
 
@@ -160,6 +165,7 @@ fn run_insect_engine_blocking(params: NormalizedEngineRequest) -> EngineResponse
             let response = EngineResponse {
                 success: true,
                 output: Some(format_search_results(&search.results, &params.format)),
+                format: Some(params.format.clone()),
                 meta: Some(EngineMeta::Search(SearchMeta {
                     kind: "search".to_string(),
                     query: params.query.clone().unwrap_or_default(),
@@ -184,6 +190,7 @@ fn run_insect_engine_blocking(params: NormalizedEngineRequest) -> EngineResponse
             let response = EngineResponse {
                 success: true,
                 output: Some(format_page_output(&page, &params.format)),
+                format: Some(params.format.clone()),
                 meta: Some(EngineMeta::Page(PageMeta {
                     kind: "page".to_string(),
                     title: page.title.clone(),
@@ -319,7 +326,7 @@ fn run_page_extraction(tab: &Tab, params: &NormalizedEngineRequest) -> Result<Pa
         .with_context(|| format!("failed to navigate to {target_url}"))?;
     tab.wait_until_navigated()
         .context("page did not finish navigation")?;
-    apply_load_method(tab, params)?;
+    let _challenge_info = apply_strategy(tab, params)?;
     extract_page_content(tab, params.verbose)
 }
 
@@ -334,7 +341,7 @@ fn run_search_with_fallback(tab: &Tab, params: &NormalizedEngineRequest) -> Resu
     let mut results = Vec::new();
 
     for engine in &params.search_engines {
-        let search_url = build_search_url(engine, query, params.google_count)
+        let search_url = build_search_url(engine, query, params.max_results)
             .map_err(|message| anyhow!(message))?;
 
         set_tab_cookies(tab, params, &search_url)?;
@@ -342,7 +349,7 @@ fn run_search_with_fallback(tab: &Tab, params: &NormalizedEngineRequest) -> Resu
             Ok(_) => {
                 tab.wait_until_navigated()
                     .with_context(|| format!("search navigation did not complete for {engine}"))?;
-                apply_load_method(tab, params)?;
+                let _ = apply_strategy(tab, params)?;
                 let snapshot = inspect_search_page(tab)?;
 
                 if is_search_blocked(engine, &snapshot.url, &snapshot.title, &snapshot.text) {
@@ -359,8 +366,8 @@ fn run_search_with_fallback(tab: &Tab, params: &NormalizedEngineRequest) -> Resu
                 }
 
                 let raw_results =
-                    extract_search_results_for_engine(tab, engine, params.google_count)?;
-                let normalized = normalize_search_results(engine, raw_results, params.google_count);
+                    extract_search_results_for_engine(tab, engine, params.max_results)?;
+                let normalized = normalize_search_results(engine, raw_results, params.max_results);
                 let reason = if normalized.is_empty() {
                     "no_results"
                 } else {
@@ -401,39 +408,94 @@ fn run_search_with_fallback(tab: &Tab, params: &NormalizedEngineRequest) -> Resu
     })
 }
 
-fn apply_load_method(tab: &Tab, params: &NormalizedEngineRequest) -> Result<()> {
-    match params.method.as_str() {
-        "direct" => thread::sleep(Duration::from_millis(1200)),
-        "wait" => {
+/// Apply the extraction strategy. Mirrors the JS `applyStrategy` — `auto`
+/// detects challenges and waits for resolution, then handles SPA/scroll;
+/// the other strategies are explicit. Returns challenge info if any was
+/// detected so the caller can surface it in meta or fail honestly.
+fn apply_strategy(tab: &Tab, params: &NormalizedEngineRequest) -> Result<crate::challenge::ChallengeInfo> {
+    use crate::challenge;
+
+    let mut challenge_info = challenge::ChallengeInfo::none();
+
+    // Challenge handling: auto always does it; other strategies opt in via
+    // bypass_challenges. Runs BEFORE the strategy-specific wait.
+    let handle_challenges = params.strategy == "auto" || params.bypass_challenges;
+    if handle_challenges && params.challenge_timeout > 0 {
+        challenge_info = challenge::wait_for_challenge_resolution(
+            tab,
+            params.challenge_timeout * 1000,
+            1500,
+        );
+    }
+
+    match params.strategy.as_str() {
+        "auto" => {
+            // network idle-ish wait, then content/SPA/scroll detection.
+            thread::sleep(Duration::from_millis(1200));
+            if !has_substantive_content(tab) {
+                let wait_secs = if params.render_wait > 0 { params.render_wait } else { 3 };
+                thread::sleep(Duration::from_secs(wait_secs));
+            }
+            if detect_infinite_scroll(tab) {
+                scroll_tab(tab, params.scroll_count, params.scroll_delay)?;
+                thread::sleep(Duration::from_millis(1000));
+            }
+        }
+        "fast" => thread::sleep(Duration::from_millis(1200)),
+        "patient" => {
             if let Some(selector) = &params.selector {
                 tab.wait_for_element(selector)
                     .with_context(|| format!("selector '{selector}' did not appear"))?;
             } else {
                 thread::sleep(Duration::from_millis(1200));
             }
+            if params.render_wait > 0 {
+                thread::sleep(Duration::from_secs(params.render_wait));
+            }
+        }
+        "spa" => {
+            let wait_secs = if params.render_wait > 0 { params.render_wait } else { 3 };
+            thread::sleep(Duration::from_millis(wait_secs * 1000 + 500));
         }
         "scroll" => {
-            let script = format!(
-                "(async () => {{
-                    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-                    for (let i = 0; i < {}; i++) {{
-                        window.scrollBy(0, window.innerHeight + Math.floor(Math.random() * 400 + 100));
-                        await wait({} + Math.floor(Math.random() * 300));
-                    }}
-                    window.scrollTo(0, 0);
-                    return true;
-                }})()",
-                params.scroll_count, params.scroll_delay
-            );
-            tab.evaluate(&script, true)
-                .context("failed during scroll extraction method")?;
+            scroll_tab(tab, params.scroll_count, params.scroll_delay)?;
             thread::sleep(Duration::from_millis(1000));
         }
-        "timed" => thread::sleep(Duration::from_secs(params.timeout)),
-        "spa" => thread::sleep(Duration::from_millis(2500)),
         _ => thread::sleep(Duration::from_millis(1200)),
     }
+    Ok(challenge_info)
+}
+
+fn scroll_tab(tab: &Tab, scroll_count: u32, scroll_delay: u64) -> Result<()> {
+    let script = format!(
+        "(async () => {{
+            const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+            for (let i = 0; i < {}; i++) {{
+                window.scrollBy(0, window.innerHeight + Math.floor(Math.random() * 400 + 100));
+                await wait({} + Math.floor(Math.random() * 300));
+            }}
+            window.scrollTo(0, 0);
+            return true;
+        }})()",
+        scroll_count, scroll_delay
+    );
+    tab.evaluate(&script, true).context("failed during scroll")?;
     Ok(())
+}
+
+fn has_substantive_content(tab: &Tab) -> bool {
+    match tab.evaluate("(document.body && document.body.innerText || '').trim().length >= 200", true) {
+        Ok(remote) => remote.value.and_then(|val| val.as_bool()).unwrap_or(false),
+        Err(_) => false,
+    }
+}
+
+fn detect_infinite_scroll(tab: &Tab) -> bool {
+    let js = "(() => { const s = document.querySelectorAll(\"[data-pagination], [data-load-more], [data-infinite-scroll], .infinite-scroll, .load-more, #load-more, [role='feed']\"); if (s.length > 0) return true; const feed = document.querySelector(\"[class*='feed'], [class*='Feed'], main\"); return Boolean(feed) && document.documentElement.scrollHeight > window.innerHeight * 3; })()";
+    match tab.evaluate(js, true) {
+        Ok(remote) => remote.value.and_then(|val| val.as_bool()).unwrap_or(false),
+        Err(_) => false,
+    }
 }
 
 fn persist_artifacts(tab: &Tab, params: &NormalizedEngineRequest) -> Result<ArtifactMeta> {
@@ -722,6 +784,10 @@ fn build_stealth_script(fingerprint: &FingerprintProfile) -> String {
     )
 }
 
+/// Cross-platform Chrome/Chromium/Edge discovery. Honors the CHROME env var
+/// first, then probes well-known install locations for Windows, macOS, and
+/// Linux (point 10: the prior version was Windows-only, silently failing on
+/// other platforms).
 fn detect_browser_path() -> Option<PathBuf> {
     let from_env = std::env::var("CHROME")
         .ok()
@@ -732,9 +798,20 @@ fn detect_browser_path() -> Option<PathBuf> {
     }
 
     [
+        // Windows
         PathBuf::from(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
         PathBuf::from(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
         PathBuf::from(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
+        // macOS (Chrome + Chromium + Edge)
+        PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+        PathBuf::from("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+        PathBuf::from("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
+        // Linux (common Chrome + Chromium install paths)
+        PathBuf::from("/usr/bin/google-chrome"),
+        PathBuf::from("/usr/bin/google-chrome-stable"),
+        PathBuf::from("/usr/bin/chromium"),
+        PathBuf::from("/usr/bin/chromium-browser"),
+        PathBuf::from("/snap/bin/chromium"),
     ]
     .into_iter()
     .find(|path| path.exists())
@@ -772,6 +849,7 @@ fn browser_launch_error(message: &str) -> EngineResponse {
     EngineResponse {
         success: false,
         output: None,
+        format: None,
         meta: None,
         error_code: Some("BROWSER_LAUNCH".to_string()),
         error: Some(format!(
@@ -784,6 +862,7 @@ fn upstream_error(message: &str) -> EngineResponse {
     EngineResponse {
         success: false,
         output: None,
+        format: None,
         meta: None,
         error_code: Some("UPSTREAM_REQUEST".to_string()),
         error: Some(message.to_string()),

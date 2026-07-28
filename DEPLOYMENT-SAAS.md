@@ -1,8 +1,8 @@
-# Insect SaaS Hosting and Deployment Guide
+# Nsect SaaS Hosting and Deployment Guide
 
 ## Deployment Model
 
-Insect is designed as:
+Nsect is designed as:
 
 - one hosted API service for extraction (`/api/engine`)
 - one hosted API service for YouTube transcript extraction (`/api/youtube/transcript`)
@@ -21,14 +21,14 @@ Recommended pattern:
 - `PORT`
 - `ADMIN_KEY`
 - `NODE_ENV=production` (recommended for hosted environments)
-- `INSECT_INVIDIOUS_INSTANCES` (optional CSV override)
-- `INSECT_PIPED_INSTANCES` (optional CSV override)
-- `INSECT_YTDLP_COMMANDS` (optional CSV command fallback list)
+- `NSECT_INVIDIOUS_INSTANCES` (optional CSV override)
+- `NSECT_PIPED_INSTANCES` (optional CSV override)
+- `NSECT_YTDLP_COMMANDS` (optional CSV command fallback list)
 
 For MCP clients:
 
-- `INSECT_API_URL`
-- `INSECT_API_KEY`
+- `NSECT_API_URL`
+- `NSECT_API_KEY`
 
 ## Hosting Option A: Ubuntu VM + systemd (Recommended Baseline)
 
@@ -36,7 +36,7 @@ Run on the host after cloning the repo:
 
 ```bash
 bash scripts/deploy-saas-host.sh \
-  --repo-dir /opt/insect \
+  --repo-dir /opt/nsect \
   --admin-key "replace-with-strong-secret" \
   --port 3000 \
   --service-user "$USER"
@@ -47,7 +47,7 @@ This script:
 - installs dependencies
 - installs Puppeteer browser binary
 - writes `.env`
-- creates `insect-api.service`
+- creates `nsect-api.service`
 - enables and starts service
 
 After deploy:
@@ -116,7 +116,7 @@ Insert output into your MCP client config.
 - Monitor health endpoint and process restarts
 - Alert on elevated 5xx/502/503 rates
 - Track key usage and rate-limit events
-- Track transcript adapter success distribution by method (`insect_native`, `insect_signal`, `invidious`, `piped`, `yt_dlp`)
+- Track transcript adapter success distribution by method (`nsect_native`, `nsect_signal`, `invidious`, `piped`, `yt_dlp`)
 - Back up `data/keys.sqlite` (plus WAL/SHM sidecar files when present) if using local storage
 
 ## Notes for True Multi-Node SaaS

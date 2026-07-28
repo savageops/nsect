@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod challenge;
 pub mod config;
 pub mod contracts;
 pub mod db;
@@ -28,7 +29,13 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(config: Config) -> Result<Self> {
-        let http = Client::builder().user_agent("insect-rs/0.1.0").build()?;
+        // User-agent reflects the real crate version (point 11a) rather than a
+        // stale hardcoded string.
+        let user_agent = format!("nsect-rs/{}", env!("CARGO_PKG_VERSION"));
+        let http = Client::builder().user_agent(user_agent).build()?;
+        // In local mode the key store is never used (no auth), but we open it
+        // unconditionally so the schema is ready if the operator switches modes
+        // without restarting from a fresh data dir.
         let keys = KeyStore::open(&config.db_path)?;
         Ok(Self { config, http, keys })
     }

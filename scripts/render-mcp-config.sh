@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_URL="${INSECT_API_URL:-}"
-API_KEY="${INSECT_API_KEY:-}"
+API_URL="${NSECT_API_URL:-}"
+API_KEY="${NSECT_API_KEY:-}"
 ENTRY_PATH="./packages/mcp/index.js"
 
 usage() {
@@ -10,8 +10,8 @@ usage() {
 Usage: bash scripts/render-mcp-config.sh [options]
 
 Options:
-  --api-url <url>        Hosted Insect API URL
-  --api-key <key>        Insect API key
+  --api-url <url>        Hosted Nsect API URL
+  --api-key <key>        Nsect API key
   --entry-path <path>    Path to MCP server index.js (default: ./packages/mcp/index.js)
   -h, --help             Show this help message
 EOF
@@ -52,12 +52,12 @@ node -e '
 const [entryPath, apiUrl, apiKey] = process.argv.slice(1);
 const config = {
   mcpServers: {
-    insect: {
+    nsect: {
       command: "node",
       args: [entryPath],
       env: {
-        INSECT_API_URL: apiUrl,
-        INSECT_API_KEY: apiKey
+        NSECT_API_URL: apiUrl,
+        NSECT_API_KEY: apiKey
       }
     }
   }

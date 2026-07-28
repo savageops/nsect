@@ -117,22 +117,22 @@ describe("formatOutput()", () => {
     expect(result).toContain("world");
   });
 
-  it("format 'links' returns formatted links", () => {
+  it("format 'links' returns a parsed array of link objects", () => {
     const result = formatOutput(sampleData, "links");
-    expect(result).toContain("https://example.com/1");
-    expect(result).toContain("| Link 1");
-    expect(result).toContain("https://example.com/2");
-    expect(result).toContain("| Link 2");
+    expect(Array.isArray(result)).toBe(true);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual({ text: "Link 1", href: "https://example.com/1" });
+    expect(result[1].href).toBe("https://example.com/2");
   });
 
-  it("format 'json' returns valid JSON with expected fields", () => {
+  it("format 'json' returns a parsed object (not a stringified string)", () => {
     const result = formatOutput(sampleData, "json");
-    const parsed = JSON.parse(result);
-    expect(parsed.title).toBe("Test Page");
-    expect(parsed.url).toBe("https://example.com");
-    expect(parsed.text).toBe("Hello world");
-    expect(parsed.links).toHaveLength(2);
-    expect(parsed.meta.description).toBe("A test page");
+    expect(typeof result).toBe("object");
+    expect(result.title).toBe("Test Page");
+    expect(result.url).toBe("https://example.com");
+    expect(result.text).toBe("Hello world");
+    expect(result.links).toHaveLength(2);
+    expect(result.meta.description).toBe("A test page");
   });
 
   it("unknown format defaults to text", () => {
@@ -154,16 +154,17 @@ describe("formatGoogleResults()", () => {
     expect(out).toContain("2. Result 2");
   });
 
-  it("format 'links' returns only URLs", () => {
+  it("format 'links' returns a parsed array of URL strings", () => {
     const out = formatGoogleResults(results, "links");
-    expect(out).toBe("https://one.com\nhttps://two.com");
+    expect(Array.isArray(out)).toBe(true);
+    expect(out).toEqual(["https://one.com", "https://two.com"]);
   });
 
-  it("format 'json' returns valid JSON array", () => {
+  it("format 'json' returns a parsed array (not a stringified string)", () => {
     const out = formatGoogleResults(results, "json");
-    const parsed = JSON.parse(out);
-    expect(parsed).toHaveLength(2);
-    expect(parsed[0].title).toBe("Result 1");
+    expect(Array.isArray(out)).toBe(true);
+    expect(out).toHaveLength(2);
+    expect(out[0].title).toBe("Result 1");
   });
 
   it("format 'markdown' returns linked titles", () => {
@@ -172,9 +173,9 @@ describe("formatGoogleResults()", () => {
     expect(out).toContain("> First result");
   });
 
-  it("unknown format defaults to JSON", () => {
+  it("unknown format defaults to the parsed array", () => {
     const out = formatGoogleResults(results, "unknown");
-    const parsed = JSON.parse(out);
-    expect(parsed).toHaveLength(2);
+    expect(Array.isArray(out)).toBe(true);
+    expect(out).toHaveLength(2);
   });
 });

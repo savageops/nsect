@@ -2,14 +2,14 @@
 
 ## Discover the CLI Surface
 
-1. Run `scripts/run-insect-rs.ps1 --help`.
+1. Run `scripts/run-nsect-rs.ps1 --help`.
 2. Run the relevant subcommand help if the task is mode-specific.
 3. Use the subcommand examples as the starting point instead of reconstructing flags from memory.
 
 ## Run Local HTTP Serving
 
-1. Set `PORT`, `ADMIN_KEY`, and `INSECT_RS_DB_PATH` when the task needs explicit runtime state.
-2. Launch `scripts/run-insect-rs.ps1 serve`.
+1. Set `PORT`, `ADMIN_KEY`, and `NSECT_RS_DB_PATH` when the task needs explicit runtime state.
+2. Launch `scripts/run-nsect-rs.ps1 serve`.
 3. Verify `GET /health`.
 4. Exercise the intended endpoint after health succeeds.
 
@@ -32,13 +32,13 @@
 
 1. Use `transcribe-youtube --video-id` for the cleanest locator when the ID is known.
 2. Prefer native `--output` when you are calling the Rust runtime directly.
-3. Use `scripts/save-insect-transcript.ps1` when you want the wrapper to handle the save path for you.
+3. Use `scripts/save-nsect-transcript.ps1` when you want the wrapper to handle the save path for you.
 4. Use `--methods` only when you need to pin or inspect adapter order.
 5. Use `--include-segments` when timestamps matter.
 6. Confirm the returned method and format before summarizing the transcript.
 
 ## Run a Fast Smoke Pass
 
-1. Run `scripts/smoke-insect-rs.ps1`.
+1. Run `scripts/smoke-nsect-rs.ps1`.
 2. Review the created output file path.
 3. Inspect command stderr if the smoke pass fails.

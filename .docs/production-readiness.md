@@ -1,4 +1,4 @@
-# Insect Production Readiness Report
+# Nsect Production Readiness Report
 
 ## Objective
 
@@ -21,13 +21,13 @@ Keep CLI, API, and MCP on hardened engine and transcript contracts, minimize dri
 
 Shared by:
 
-- CLI entry (`insect-engine.js`)
+- CLI entry (`nsect-engine.js`)
 - API route (`server/routes/engine.js`)
 - Engine runtime (`server/core/engine.js`)
 
 ### 2. CLI/API parity
 
-`insect-engine.js` runs the same runtime pipeline as the API endpoint.
+`nsect-engine.js` runs the same runtime pipeline as the API endpoint.
 
 Result:
 
@@ -53,8 +53,8 @@ chain used by:
 
 Default adapter order:
 
-- `insect_native`
-- `insect_signal`
+- `nsect_native`
+- `nsect_signal`
 - `invidious`
 - `piped`
 - `yt_dlp`
@@ -84,8 +84,8 @@ Result:
 - robust JSON/non-JSON error parsing
 - consistent MCP error envelope output
 - env config via:
-  - `INSECT_API_URL`
-  - `INSECT_API_KEY`
+  - `NSECT_API_URL`
+  - `NSECT_API_KEY`
 
 `packages/mcp/index.js` uses that client and exposes engine-aligned tools plus `transcribe-youtube`.
 
@@ -109,8 +109,8 @@ Recommended checks:
 - `npm run test:live`
 - `powershell -ExecutionPolicy Bypass -File scripts/test-rust.ps1`
 - MCP stdio smoke:
-  - `INSECT_API_KEY=sk_test`
-  - `INSECT_API_URL=http://127.0.0.1:3000`
+  - `NSECT_API_KEY=sk_test`
+  - `NSECT_API_URL=http://127.0.0.1:3000`
   - `node packages/mcp/index.js`
 - Transcript runtime smoke:
   - `POST /api/youtube/transcript` against a known public video ID
@@ -119,6 +119,6 @@ Recommended checks:
 ## Operational Notes
 
 - Production must set `ADMIN_KEY` explicitly.
-- Rust operators should pin `INSECT_RS_DB_PATH` when they need a non-default SQLite location.
+- Rust operators should pin `NSECT_RS_DB_PATH` when they need a non-default SQLite location.
 - Preserve request contract parity when adding new engine or transcript capability.
 - API and admin keys are header-only.

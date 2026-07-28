@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use axum::{
     Json,
@@ -12,29 +13,47 @@ use serde_json::json;
 
 use crate::{
     AppState,
-    db::{ValidationContext, ValidationFailure},
+    config::Mode,
+    db::{ValidationContext, safe_compare_secret},
 };
 
+/// Admin authentication gate for /api/keys/* routes (hosted mode only).
+///
+/// Validates the admin secret via a constant-time comparison (point 2) against
+/// the configured ADMIN_KEY. Header-only (`x-admin-key`) — no Bearer ambiguity
+/// with API keys (point 11c).
 pub async fn admin_key_middleware(
     State(state): State<Arc<AppState>>,
     request: Request,
     next: Next,
 ) -> Response {
-    let admin_key = read_admin_key(request.headers()).unwrap_or_default();
-    if admin_key != state.config.admin_key {
+    let admin_key = state.config.admin_key.clone().unwrap_or_default();
+    let presented = read_admin_key(request.headers()).unwrap_or_default();
+    if !safe_compare_secret(&presented, &admin_key) {
         return json_error(
             StatusCode::FORBIDDEN.as_u16(),
-            json!({ "error": "Admin key required via x-admin-key or Authorization header." }),
+            json!({ "error": "Admin key required via x-admin-key header." }),
         );
     }
     next.run(request).await
 }
 
+/// Authorize an API key for engine/transcript routes.
+///
+/// In Local mode this is a no-op (no validation, no rate limit, no cooldown) —
+/// the developer's machine is the trust boundary. In Hosted mode it enforces
+/// the full key-state validation. Returns Ok(()) on success or an error
+/// Response on failure.
 pub fn authorize_api_key(
     headers: &HeaderMap,
     state: &Arc<AppState>,
     enforce_search_cooldown: bool,
 ) -> Result<(), Response> {
+    // Local mode: conditional security surface is inactive.
+    if state.config.mode == Mode::Local {
+        return Ok(());
+    }
+
     let api_key = read_api_key(headers).unwrap_or_default();
     state
         .keys
@@ -51,8 +70,11 @@ pub fn read_api_key(headers: &HeaderMap) -> Option<String> {
     first_header_value(headers, "x-api-key").or_else(|| read_bearer_token(headers))
 }
 
-fn read_admin_key(headers: &HeaderMap) -> Option<String> {
-    first_header_value(headers, "x-admin-key").or_else(|| read_bearer_token(headers))
+/// Admin key reader — header-only (`x-admin-key`). No Bearer fallback (point 11c).
+/// Public so the observability health route can reuse it without duplicating
+/// the header-parsing logic.
+pub fn read_admin_key(headers: &HeaderMap) -> Option<String> {
+    first_header_value(headers, "x-admin-key")
 }
 
 fn first_header_value(headers: &HeaderMap, name: &str) -> Option<String> {
@@ -87,7 +109,7 @@ pub fn json_error(status: u16, body: serde_json::Value) -> Response {
         .unwrap()
 }
 
-pub fn validation_failure_response(failure: ValidationFailure) -> Response {
+pub fn validation_failure_response(failure: crate::db::ValidationFailure) -> Response {
     let mut body = json!({
         "error": failure.error,
         "code": failure.code,
@@ -97,4 +119,45 @@ pub fn validation_failure_response(failure: ValidationFailure) -> Response {
         body["cooldownSeconds"] = json!(cooldown_seconds);
     }
     json_error(failure.status, body)
+}
+
+// -------------------------------------------------------------------------
+// Per-IP admin rate limiter (hosted only). Closes the unbounded key-minting
+// hole (point 4). In-memory and process-local — single-host guarantee;
+// multi-host deployments need a shared store (documented residual).
+// -------------------------------------------------------------------------
+
+const ADMIN_RATE_LIMIT_WINDOW_MS: u128 = 60_000;
+const ADMIN_RATE_LIMIT_MAX: u32 = 10;
+
+/// Shared admin-rate-limit state. Keyed by source IP.
+static ADMIN_WINDOWS: std::sync::LazyLock<Mutex<std::collections::HashMap<String, AdminWindow>>> =
+    std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+#[derive(Clone)]
+struct AdminWindow {
+    window_start: Instant,
+    count: u32,
+}
+
+/// Check the per-IP admin rate limit. Returns true if allowed, false if the
+/// caller exceeded ADMIN_RATE_LIMIT_MAX within the rolling window.
+pub fn admin_rate_limit_allows(ip: &str) -> bool {
+    let now = Instant::now();
+    let mut windows = ADMIN_WINDOWS.lock().expect("admin rate limit mutex poisoned");
+    match windows.get_mut(ip) {
+        Some(entry) if now.duration_since(entry.window_start).as_millis() <= ADMIN_RATE_LIMIT_WINDOW_MS => {
+            entry.count += 1;
+            entry.count <= ADMIN_RATE_LIMIT_MAX
+        }
+        _ => {
+            windows.insert(ip.to_string(), AdminWindow { window_start: now, count: 1 });
+            true
+        }
+    }
+}
+
+/// Test seam: reset the admin IP windows.
+pub fn reset_admin_rate_limit_for_tests() {
+    ADMIN_WINDOWS.lock().expect("admin rate limit mutex poisoned").clear();
 }

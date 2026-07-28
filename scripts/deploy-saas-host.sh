@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVICE_USER="${USER:-$(whoami)}"
-SERVICE_NAME="insect-api"
+SERVICE_NAME="nsect-api"
 PORT="3000"
 ADMIN_KEY="${ADMIN_KEY:-}"
 SKIP_BROWSER_INSTALL=0
@@ -12,12 +12,12 @@ usage() {
   cat <<'EOF'
 Usage: bash scripts/deploy-saas-host.sh --admin-key <value> [options]
 
-Run this on Ubuntu hosts to install and start Insect as a systemd service.
+Run this on Ubuntu hosts to install and start Nsect as a systemd service.
 
 Options:
   --repo-dir <path>          Repository root path (default: current repo)
   --service-user <user>      Linux user for service (default: current user)
-  --service-name <name>      systemd service name (default: insect-api)
+  --service-name <name>      systemd service name (default: nsect-api)
   --port <value>             API port (default: 3000)
   --admin-key <value>        Production admin key (required)
   --skip-browser-install     Skip Puppeteer browser installation
@@ -106,15 +106,15 @@ cat > .env <<EOF
 NODE_ENV=production
 PORT=${PORT}
 ADMIN_KEY=${ADMIN_KEY}
-INSECT_API_URL=http://127.0.0.1:${PORT}
-INSECT_API_KEY=
+NSECT_API_URL=http://127.0.0.1:${PORT}
+NSECT_API_KEY=
 EOF
 
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 echo "[deploy] Writing systemd service: ${SERVICE_FILE}"
 sudo tee "$SERVICE_FILE" >/dev/null <<EOF
 [Unit]
-Description=Insect API Service
+Description=Nsect API Service
 After=network.target
 
 [Service]

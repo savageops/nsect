@@ -17,13 +17,14 @@ import {
 
 const { apiBase, apiKey } = readMcpConfig();
 const SEARCH_ENGINES = ["duckduckgo", "bing", "brave", "google"];
-const TRANSCRIPT_ADAPTERS = ["insect_native", "insect_signal", "invidious", "piped", "yt_dlp"];
+const TRANSCRIPT_ADAPTERS = ["nsect_native", "nsect_signal", "invidious", "piped", "yt_dlp"];
 
+// The API key is optional: in local mode the server runs keyless, so absence is
+// not an error. Warn only when a key is absent AND the server looks hosted.
 if (!apiKey) {
-  console.error("ERROR: INSECT_API_KEY env var is required.");
-  console.error("Set it in your MCP client config:");
+  console.error("nsect MCP: NSECT_API_KEY not set — running in keyless (local) mode.");
+  console.error("If the target server runs hosted, set NSECT_API_KEY in your MCP config:");
   console.error(JSON.stringify(MCP_CONFIG_EXAMPLE, null, 2));
-  process.exit(1);
 }
 
 const apiClient = createApiClient({
@@ -32,16 +33,92 @@ const apiClient = createApiClient({
 });
 
 const server = new McpServer(
-  { name: "insect", version: "1.0.0" },
+  { name: "nsect", version: "1.0.0" },
   {
     instructions: [
-      "Insect crawler backed by a hosted API with rotating browser fingerprints.",
-      "Use these tools to run engine jobs, execute multi-engine web search fallback, discover links, inspect metadata, and fetch YouTube transcripts.",
-      "For dynamic sites, prefer method='spa' or method='wait' with a selector.",
-      "For infinite feeds, use method='scroll' and tune scroll_count/scroll_delay.",
-      `Search endpoints enforce a minimum ${MIN_SEARCH_COOLDOWN_SECONDS} second cooldown per API key between query requests.`,
-      "Search fallback order is configurable, and Google is always attempted last.",
+      "Nsect: unified web retrieval. Fetch pages, run web search, and get YouTube transcripts.",
+      "Prefer the 'fetch' tool as the default — it auto-routes to the right backend (page/search/transcript) based on your input, with the 'auto' strategy that detects and bypasses JS challenges (Cloudflare, DataDome, etc.) automatically.",
+      "Use the specialized tools (run-engine, search-web, transcribe-youtube) only when you need explicit control over strategy or parameters.",
+      "For known dynamic sites, you can pass strategy='spa' or 'patient'. For infinite feeds, strategy='scroll'. The default 'auto' handles all of these.",
+      `In hosted mode, search enforces a minimum ${MIN_SEARCH_COOLDOWN_SECONDS}s cooldown per API key. Local mode is ungated.`,
     ].join("\n"),
+  },
+);
+
+const YOUTUBE_HOSTS = ["youtube.com", "www.youtube.com", "youtu.be", "m.youtube.com"];
+
+function isYouTubeUrl(value) {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return YOUTUBE_HOSTS.includes(host);
+  } catch {
+    return false;
+  }
+}
+
+// The unified fetch tool — the zero-friction entry point. Auto-routes based on
+// the input: YouTube URL -> transcript, query (no URL) -> search, else -> page.
+server.tool(
+  "fetch",
+  [
+    "Unified web retrieval. Auto-routes to the right backend based on input:",
+    "- YouTube URL -> transcript (5-adapter fallback chain).",
+    "- A 'query' field with no URL -> multi-engine web search.",
+    "- Any other URL -> page extraction.",
+    "Uses the 'auto' strategy by default, which detects and waits for JS challenges",
+    "(Cloudflare, DataDome, PerimeterX) to self-resolve, detects SPAs, and scrolls",
+    "infinite feeds — so you usually don't need to pick a strategy.",
+    "Output is text by default; pass format='markdown' for cleaner prose or 'json' for structured.",
+  ].join("\n"),
+  {
+    url: z.string().optional().describe("URL to fetch (page or YouTube video)."),
+    query: z.string().optional().describe("Search query (when fetching search results, not a page)."),
+    format: z.enum(["text", "html", "markdown", "json", "links"]).default("markdown"),
+    strategy: z.enum(["auto", "fast", "patient", "spa", "scroll"]).default("auto"),
+    timeout: z.number().int().min(1).max(180).default(30),
+    max_results: z.number().int().min(1).max(50).default(10),
+  },
+  async (params) => {
+    // Route 1: YouTube -> transcript
+    if (params.url && isYouTubeUrl(params.url)) {
+      const result = await apiClient.postJson(YOUTUBE_TRANSCRIPT_API_PATH, {
+        url: params.url,
+        format: params.format === "html" ? "text" : params.format,
+        timeout: 20,
+      });
+      if (!result.ok) return toMcpError(result.errorMessage);
+      return {
+        content: [{ type: "text", text: asText(result.payload.output) + buildMetaSummary(result.payload.meta) }],
+      };
+    }
+
+    // Route 2: query (no URL) -> search
+    if (params.query && !params.url) {
+      const payload = await callEngineApi({
+        query: params.query,
+        googleCount: params.max_results,
+        format: params.format,
+      });
+      if (payload.isError) return payload;
+      return {
+        content: [{ type: "text", text: asText(payload.output) + buildMetaSummary(payload.meta) }],
+      };
+    }
+
+    // Route 3: URL -> page extraction
+    if (!params.url) {
+      return toMcpError("Either 'url' or 'query' is required.");
+    }
+    const payload = await callEngineApi({
+      url: params.url,
+      format: params.format,
+      strategy: params.strategy,
+      timeout: params.timeout,
+    });
+    if (payload.isError) return payload;
+    return {
+      content: [{ type: "text", text: asText(payload.output) + buildMetaSummary(payload.meta) }],
+    };
   },
 );
 
@@ -75,7 +152,7 @@ function asText(value) {
 server.tool(
   "run-engine",
   [
-    "Run a page extraction job through the Insect engine API.",
+    "Run a page extraction job through the Nsect engine API.",
     "Supports five loading methods: direct, wait, scroll, timed, and spa.",
     "Supports output formats: text, html, markdown, json, and links.",
   ].join("\n"),
@@ -112,41 +189,11 @@ server.tool(
 );
 
 server.tool(
-  "engine-search",
-  [
-    "Run a multi-engine web search with fallback and return ranked results.",
-    "Default order: duckduckgo,bing,brave,google (Google is always forced to the final attempt).",
-    `Search requests are rate-limited with a minimum ${MIN_SEARCH_COOLDOWN_SECONDS} second cooldown per API key.`,
-    "Output can be text, json, links, or markdown.",
-  ].join("\n"),
-  {
-    query: z.string().min(1).describe("Search query text."),
-    count: z.number().int().min(1).max(50).default(10),
-    format: z.enum(["text", "json", "links", "markdown"]).default("text"),
-    engines: z.array(z.enum(SEARCH_ENGINES)).optional(),
-  },
-  async (params) => {
-    const payload = await callEngineApi({
-      google: params.query,
-      googleCount: params.count,
-      format: params.format,
-      searchEngines: params.engines,
-    });
-
-    if (payload.isError) return payload;
-
-    return {
-      content: [{ type: "text", text: asText(payload.output) + buildMetaSummary(payload.meta) }],
-    };
-  },
-);
-
-server.tool(
   "search-web",
   [
     "Run a multi-engine web search with fallback and return ranked results.",
     "Default order: duckduckgo,bing,brave,google (Google is always forced to the final attempt).",
-    `Search requests are rate-limited with a minimum ${MIN_SEARCH_COOLDOWN_SECONDS} second cooldown per API key.`,
+    `In hosted mode, search requests enforce a minimum ${MIN_SEARCH_COOLDOWN_SECONDS} second cooldown per API key; local mode is ungated.`,
     "Output can be text, json, links, or markdown.",
   ].join("\n"),
   {
@@ -175,9 +222,9 @@ server.tool(
   "transcribe-youtube",
   [
     "Fetch a YouTube transcript using a resilient adapter chain.",
-    "Fallback order defaults to: insect_native -> insect_signal -> invidious -> piped -> yt_dlp.",
-    "When one adapter fails, Insect automatically tries the next.",
-    "Insect-native methods are direct integration paths without third-party API dependencies.",
+    "Fallback order defaults to: nsect_native -> nsect_signal -> invidious -> piped -> yt_dlp.",
+    "When one adapter fails, Nsect automatically tries the next.",
+    "Nsect-native methods are direct integration paths without third-party API dependencies.",
     "Output supports text, json, and markdown.",
   ].join("\n"),
   {
@@ -287,4 +334,4 @@ server.tool(
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error("insect MCP server running on stdio");
+console.error("nsect MCP server running on stdio");

@@ -1,11 +1,11 @@
 {
-  "name": "insect",
+  "name": "nsect",
   "version": "1.0.0",
-  "description": "Insect crawler with fingerprint randomization - CLI, API server, and MCP server",
+  "description": "Nsect crawler with fingerprint randomization - CLI, API server, and MCP server",
   "type": "module",
-  "main": "insect-engine.js",
+  "main": "nsect-engine.js",
   "scripts": {
-    "engine": "node insect-engine.js",
+    "engine": "node nsect-engine.js",
     "server": "node api.js",
     "mcp": "node packages/mcp/index.js",
     "transcript:save": "node scripts/save-transcript.mjs",
@@ -24,10 +24,13 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1",
+    "defuddle": "^0.19.2",
     "express": "^5.2.1",
+    "linkedom": "^0.18.13",
     "puppeteer": "^24.4.0",
     "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "rebrowser-puppeteer-core": "^24.8.1"
   },
   "devDependencies": {
     "cross-env": "^7.0.3",

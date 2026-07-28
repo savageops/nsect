@@ -6,11 +6,11 @@ param(
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $skillRoot = (Resolve-Path (Join-Path $scriptDir "..")).Path
-$bundledBinary = Join-Path $skillRoot "assets\\bin\\insect-rs.exe"
+$bundledBinary = Join-Path $skillRoot "assets\\bin\\nsect-rs.exe"
 $candidateBinaries = @()
 
-if ($env:INSECT_RS_BIN) {
-  $candidateBinaries += $env:INSECT_RS_BIN
+if ($env:NSECT_RS_BIN) {
+  $candidateBinaries += $env:NSECT_RS_BIN
 }
 
 $candidateBinaries += $bundledBinary
@@ -20,7 +20,7 @@ $binary = $candidateBinaries |
   Select-Object -First 1
 
 if (-not $binary) {
-  throw "insect-rs.exe not found. Expected $bundledBinary or set INSECT_RS_BIN."
+  throw "nsect-rs.exe not found. Expected $bundledBinary or set NSECT_RS_BIN."
 }
 
 & $binary @CliArgs

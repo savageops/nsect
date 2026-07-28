@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, rmSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
+import Database from "better-sqlite3";
 import {
   validateKey,
   createKey,
@@ -14,12 +15,25 @@ import {
 } from "../server/db/keys.js";
 
 function tempDbPath() {
-  return resolve(tmpdir(), `insect-keys-${randomUUID()}.sqlite`);
+  return resolve(tmpdir(), `nsect-keys-${randomUUID()}.sqlite`);
 }
 
 function removeDbFiles(dbPath) {
   for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
     if (existsSync(path)) rmSync(path, { force: true });
+  }
+}
+
+/**
+ * Open the on-disk SQLite directly (bypassing the keys module) to prove the
+ * plaintext secret is never persisted — only its sha-256 hash.
+ */
+function rawRows(dbPath) {
+  const db = new Database(dbPath, { readonly: true });
+  try {
+    return db.prepare("SELECT * FROM api_keys").all();
+  } finally {
+    db.close();
   }
 }
 
@@ -37,7 +51,7 @@ describe("server/db/keys.js", () => {
     removeDbFiles(dbPath);
   });
 
-  it("creates keys with expected defaults", () => {
+  it("creates keys with expected defaults and a plaintext returned once", () => {
     const result = createKey("test-key");
     expect(result.apiKey).toMatch(/^sk_[0-9a-f]{32}$/);
     expect(result.label).toBe("test-key");
@@ -48,6 +62,7 @@ describe("server/db/keys.js", () => {
     expect(result.createdAt).toBeTruthy();
     expect(result.lastUsed).toBeNull();
     expect(result.expiresAt).toBeNull();
+    expect(result.keyHash).toMatch(/^[0-9a-f]{12}…$/);
     expect(existsSync(dbPath)).toBe(true);
   });
 
@@ -55,6 +70,21 @@ describe("server/db/keys.js", () => {
     const a = createKey("a");
     const b = createKey("b");
     expect(a.apiKey).not.toBe(b.apiKey);
+  });
+
+  it("never persists the plaintext secret — only the sha-256 hash", () => {
+    const { apiKey } = createKey("secret-check");
+    const expectedHash = createHash("sha256").update(apiKey).digest("hex");
+
+    const rows = rawRows(dbPath);
+    expect(rows.length).toBe(1);
+    expect(rows[0].key_hash).toBe(expectedHash);
+
+    // The plaintext must not appear anywhere in the stored row.
+    const serialized = JSON.stringify(rows[0]);
+    expect(serialized).not.toContain(apiKey);
+    // The plaintext column must not exist as a field.
+    expect(rows[0]).not.toHaveProperty("api_key");
   });
 
   it("returns valid: false for missing key", () => {
@@ -128,21 +158,22 @@ describe("server/db/keys.js", () => {
     expect(result.retryAfter).toBeGreaterThan(0);
   });
 
-  it("lists keys with masked API keys", () => {
+  it("lists keys with masked keyHash (never plaintext)", () => {
     createKey("list-a");
     createKey("list-b");
     const keys = listKeys();
     expect(keys.length).toBeGreaterThanOrEqual(2);
     for (const keyInfo of keys) {
-      expect(keyInfo.apiKey).toMatch(/^sk_[0-9a-f]{9}\.\.\.$/);
+      expect(keyInfo.keyHash).toMatch(/^[0-9a-f]{12}…$/);
+      expect(keyInfo).not.toHaveProperty("apiKey");
     }
   });
 
-  it("returns masked key info for specific key", () => {
+  it("returns masked keyHash info for specific key", () => {
     const { apiKey } = createKey("info-test");
     const info = getKeyInfo(apiKey);
     expect(info).toBeTruthy();
     expect(info.label).toBe("info-test");
-    expect(info.apiKey).toMatch(/^sk_[0-9a-f]{9}\.\.\.$/);
+    expect(info.keyHash).toMatch(/^[0-9a-f]{12}…$/);
   });
 });

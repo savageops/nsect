@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nsect"
+  short_description: "Alias trigger for the canonical Nsect runtime"
+  default_prompt: "Use $nsect to route crawling, search, transcript, or runtime tasks into the canonical Nsect Rust runtime workflow."

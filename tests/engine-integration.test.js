@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { runInsectEngine } from "../server/core/engine.js";
+import { runNsectEngine } from "../server/core/engine.js";
 
 const itLive = process.env.LIVE_INTEGRATION === "1" ? it : it.skip;
 
-describe("core insect engine (integration)", () => {
+describe("core nsect engine (integration)", () => {
   it("throws error for missing url and google", async () => {
-    await expect(runInsectEngine({
+    await expect(runNsectEngine({
       method: "direct",
       format: "text",
       timeout: 5,
@@ -13,7 +13,7 @@ describe("core insect engine (integration)", () => {
   });
 
   itLive("scrapes example.com with method=direct, format=text", async () => {
-    const result = await runInsectEngine({
+    const result = await runNsectEngine({
       url: "https://example.com",
       method: "direct",
       format: "text",
@@ -27,7 +27,7 @@ describe("core insect engine (integration)", () => {
   }, 30000);
 
   itLive("runs fallback search and keeps google last", async () => {
-    const result = await runInsectEngine({
+    const result = await runNsectEngine({
       query: "example domain",
       format: "json",
       googleCount: 3,

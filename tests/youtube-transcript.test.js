@@ -32,15 +32,15 @@ describe("YouTube transcript adapter", () => {
     const result = await fetchYouTubeTranscript(
       {
         videoId: "dQw4w9WgXcQ",
-        methods: ["insect_native", "insect_signal"],
+        methods: ["nsect_native", "nsect_signal"],
         format: "json",
       },
       {
         methodRunners: {
-          insect_native: async () => {
-            throw new Error("insect_native blocked");
+          nsect_native: async () => {
+            throw new Error("nsect_native blocked");
           },
-          insect_signal: async () => ({
+          nsect_signal: async () => ({
             language: "en",
             segments: [
               { text: "Never gonna give you up", start: 0, duration: 2 },
@@ -52,26 +52,26 @@ describe("YouTube transcript adapter", () => {
     );
 
     expect(result.success).toBe(true);
-    expect(result.meta.method).toBe("insect_signal");
-    expect(result.meta.attempts.map((attempt) => attempt.method)).toEqual(["insect_native", "insect_signal"]);
+    expect(result.meta.method).toBe("nsect_signal");
+    expect(result.meta.attempts.map((attempt) => attempt.method)).toEqual(["nsect_native", "nsect_signal"]);
     expect(result.meta.attempts[0].status).toBe("error");
     expect(result.meta.attempts[1].status).toBe("ok");
-    expect(result.output).toContain("\"method\": \"insect_signal\"");
+    expect(result.output).toContain("\"method\": \"nsect_signal\"");
   });
 
   it("returns TRANSCRIPT_UNAVAILABLE when all adapters fail", async () => {
     const result = await fetchYouTubeTranscript(
       {
         videoId: "dQw4w9WgXcQ",
-        methods: ["insect_native", "insect_signal"],
+        methods: ["nsect_native", "nsect_signal"],
       },
       {
         methodRunners: {
-          insect_native: async () => {
-            throw new Error("insect_native failed");
+          nsect_native: async () => {
+            throw new Error("nsect_native failed");
           },
-          insect_signal: async () => {
-            throw new Error("insect_signal failed");
+          nsect_signal: async () => {
+            throw new Error("nsect_signal failed");
           },
         },
       },

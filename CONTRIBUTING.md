@@ -1,6 +1,6 @@
-# Contributing to Insect
+# Contributing to Nsect
 
-Thanks for helping build Insect.
+Thanks for helping build Nsect.
 
 This project is designed around one shared engine contract that powers CLI, API, and MCP usage. Contributions should preserve that parity and keep changes clean, testable, and production-safe.
 
@@ -32,7 +32,7 @@ npm run install-browser
 - Engine runtime: `server/core/engine.js`
 - API routes and auth: `server/routes/*`, `server/middleware/*`, `server/db/keys.js`
 - MCP tool contracts: `packages/mcp/index.js`, `packages/mcp/api-client.js`
-- CLI wrapper: `insect-engine.js`
+- CLI wrapper: `nsect-engine.js`
 
 ## Validation Matrix (Required)
 

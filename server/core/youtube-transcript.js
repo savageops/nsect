@@ -4,8 +4,8 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFileCb);
 
 export const YOUTUBE_TRANSCRIPT_METHODS = Object.freeze([
-  "insect_native",
-  "insect_signal",
+  "nsect_native",
+  "nsect_signal",
   "invidious",
   "piped",
   "yt_dlp",
@@ -624,7 +624,7 @@ function extractCaptionTracks(playerResponse) {
   return playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
 }
 
-async function runInsectNativeMethod(request, context) {
+async function runNsectNativeMethod(request, context) {
   const watchHtml = await getWatchPage(context, request.videoId);
   const playerResponse = extractPlayerResponseFromWatchPage(watchHtml);
   if (!playerResponse) {
@@ -664,7 +664,7 @@ function extractInnertubeConfig(html) {
   };
 }
 
-async function runInsectSignalMethod(request, context) {
+async function runNsectSignalMethod(request, context) {
   const watchHtml = await getWatchPage(context, request.videoId);
   const innertube = extractInnertubeConfig(watchHtml);
   if (!innertube) {
@@ -891,8 +891,8 @@ async function runYtDlpMethod(request, context) {
 }
 
 const DEFAULT_METHOD_RUNNERS = Object.freeze({
-  insect_native: runInsectNativeMethod,
-  insect_signal: runInsectSignalMethod,
+  nsect_native: runNsectNativeMethod,
+  nsect_signal: runNsectSignalMethod,
   invidious: runInvidiousMethod,
   piped: runPipedMethod,
   yt_dlp: runYtDlpMethod,
@@ -912,13 +912,13 @@ export async function fetchYouTubeTranscript(input, deps = {}) {
     },
     cache: new Map(),
     invidiousInstances: deps.invidiousInstances
-      || parseListFromEnv(process.env.INSECT_INVIDIOUS_INSTANCES)
+      || parseListFromEnv(process.env.NSECT_INVIDIOUS_INSTANCES)
       || [...DEFAULT_INVIDIOUS_INSTANCES],
     pipedInstances: deps.pipedInstances
-      || parseListFromEnv(process.env.INSECT_PIPED_INSTANCES)
+      || parseListFromEnv(process.env.NSECT_PIPED_INSTANCES)
       || [...DEFAULT_PIPED_INSTANCES],
     ytDlpCommands: deps.ytDlpCommands
-      || parseListFromEnv(process.env.INSECT_YTDLP_COMMANDS)
+      || parseListFromEnv(process.env.NSECT_YTDLP_COMMANDS)
       || ["yt-dlp", "yt-dlp.exe"],
   };
 

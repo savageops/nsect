@@ -7,7 +7,7 @@ usage() {
   cat <<'EOF'
 Usage: bash scripts/start-api.sh
 
-Starts the Insect API from the repository root using current environment.
+Starts the Nsect API from the repository root using current environment.
 EOF
 }
 
@@ -21,13 +21,25 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ "${NODE_ENV:-}" == "production" && -z "${ADMIN_KEY:-}" ]]; then
-  echo "Error: ADMIN_KEY must be set when NODE_ENV=production." >&2
+# Hosted mode requires ADMIN_KEY. The config owner fail-fasts too, but checking
+# here gives a cleaner error before the process starts.
+HOSTED=0
+if [[ "${NSECT_HOSTED:-}" == "1" || "${NODE_ENV:-}" == "production" ]]; then
+  HOSTED=1
+fi
+if [[ "$HOSTED" == "1" && -z "${ADMIN_KEY:-}" ]]; then
+  echo "Error: ADMIN_KEY must be set in hosted mode (NSECT_HOSTED=1 or NODE_ENV=production)." >&2
   exit 1
+fi
+
+if [[ "$HOSTED" == "1" ]]; then
+  echo "[start-api] Starting Nsect API in HOSTED mode..."
+else
+  echo "[start-api] Starting Nsect API in LOCAL mode (keyless)..."
 fi
 
 cd "$ROOT_DIR"
 mkdir -p data
 
-echo "[start-api] Starting Insect API..."
+echo "[start-api] Starting Nsect API..."
 exec node api.js

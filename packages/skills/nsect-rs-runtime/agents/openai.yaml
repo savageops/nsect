@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nsect RS Runtime"
+  short_description: "Canonical Nsect crawl, search, and transcript runtime"
+  default_prompt: "Use $nsect-rs-runtime as the canonical Nsect skill to crawl, search, transcribe, validate, or serve with the bundled Rust runtime."

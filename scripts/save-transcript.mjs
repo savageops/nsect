@@ -15,7 +15,7 @@ function ensureParentDir(filePath) {
 }
 
 function resolveRustCommand(repoRoot) {
-  const binaryPath = resolve(repoRoot, "rust", "target", "release", "insect-rs.exe");
+  const binaryPath = resolve(repoRoot, "rust", "target", "release", "nsect-rs.exe");
   if (existsSync(binaryPath)) {
     return { command: binaryPath, args: [] };
   }

@@ -26,7 +26,7 @@ function slugify(value, index) {
 }
 
 function resolveRustCommand(repoRoot) {
-  const binaryPath = resolve(repoRoot, "rust", "target", "release", "insect-rs.exe");
+  const binaryPath = resolve(repoRoot, "rust", "target", "release", "nsect-rs.exe");
   if (existsSync(binaryPath)) {
     return { command: binaryPath, args: [] };
   }
@@ -71,7 +71,7 @@ function collectQueries(options, repoRoot) {
 
 function runJsQuery(repoRoot, options, query, outputPath) {
   return spawnSync("node", [
-    "insect-engine.js",
+    "nsect-engine.js",
     "--query",
     query,
     "--format",
@@ -123,7 +123,7 @@ function parseCli() {
       timeout: { type: "string", default: "30" },
       "delay-ms": { type: "string", default: "250" },
       metadata: { type: "boolean", default: true },
-      "lock-name": { type: "string", default: "insect-search-harvest" },
+      "lock-name": { type: "string", default: "nsect-search-harvest" },
       help: { type: "boolean", default: false },
     },
     strict: true,

@@ -12,36 +12,47 @@ import {
   RequestValidationError,
   normalizeEngineRequest,
 } from "./server/core/request.js";
-import { runInsectEngine } from "./server/core/engine.js";
+import { runNsectEngine } from "./server/core/engine.js";
 
 function printHelp() {
-  const methodHelp = Object.entries(METHODS)
-    .map(([name, description]) => `  ${name.padEnd(10)} - ${description}`)
-    .join("\n");
   const formatHelp = FORMATS.map((format) => `  ${format}`).join("\n");
   const searchHelp = SUPPORTED_SEARCH_ENGINES.map((engine) => `  ${engine}`).join("\n");
 
   console.log(`
-insect v1.0.0
+nsect v1.0.0
 
 USAGE:
-  node insect-engine.js --url <url> [options]
+  node nsect-engine.js --url <url> [options]
+  node nsect-engine.js --query <query> [options]
 
-REQUIRED:
-  --url <url>            Target URL to scrape
+REQUIRED (one of):
+  --url <url>            Target URL to extract
   --query <query>        Search query to run across fallback engines
   --google <query>       Legacy alias for --query
 
+STRATEGY:
+  --strategy <s>         Extraction strategy (default: auto)
+    auto                 Detect challenges + SPA + infinite scroll automatically
+    fast                 Static pages, minimum wait
+    patient              Slow renders; pair with --selector or --render-wait
+    spa                  Client-rendered single-page apps
+    scroll               Infinite feeds
+  --method <method>      Legacy alias for --strategy (direct/wait/timed/spa/scroll)
+  --bypass-challenges    Enable challenge detection/resolution for non-auto strategies
+  --challenge-timeout <s>  Budget for auto-resolvable challenges (default: 15)
+  --render-wait <s>      Extra seconds to wait for slow renders (default: 0)
+
 OPTIONS:
-  --method <method>      Scraping method (default: direct)
   --format <format>      Output format (default: text)
+                         text/html/markdown -> string; json/links -> structured
   --verbose              Include all content (default: filtered)
-  --selector <css>       CSS selector for method=wait
-  --timeout <sec>        Request timeout in seconds (default: 30)
-  --scroll-count <n>     Scroll iterations for method=scroll (default: 20)
+  --selector <css>       CSS selector for strategy=patient
+  --timeout <sec>        Overall operation timeout in seconds (default: 30)
+  --scroll-count <n>     Scroll iterations for strategy=scroll (default: 20)
   --scroll-delay <ms>    Delay between scrolls in milliseconds (default: 800)
   --delay <ms>           Pre-engine randomized delay floor in ms (default: 1000)
-  --google-count <n>     Maximum search results to return (default: 10)
+  --max-results <n>      Maximum search results to return (default: 10)
+  --google-count <n>     Legacy alias for --max-results
   --search-engines <csv> Search fallback order; Google is always forced last
                          (default: ${DEFAULT_SEARCH_ENGINES.join(",")})
   --proxy <url>          HTTP/HTTPS proxy URL
@@ -55,9 +66,6 @@ OPTIONS:
   --metadata             Print engine metadata to stderr
   --output <path>        Write output to file instead of stdout
   --help                 Show this help
-
-METHODS:
-${methodHelp}
 
 FORMATS:
 ${formatHelp}
@@ -73,14 +81,19 @@ function parseCli() {
       url: { type: "string" },
       query: { type: "string" },
       google: { type: "string" },
-      method: { type: "string", default: "direct" },
+      strategy: { type: "string" },
+      method: { type: "string" },
       format: { type: "string", default: "text" },
       verbose: { type: "boolean", default: false },
       selector: { type: "string" },
       timeout: { type: "string", default: "30" },
+      "render-wait": { type: "string", default: "0" },
+      "challenge-timeout": { type: "string", default: "15" },
+      "bypass-challenges": { type: "boolean", default: false },
       "scroll-count": { type: "string", default: "20" },
       "scroll-delay": { type: "string", default: "800" },
       delay: { type: "string", default: "1000" },
+      "max-results": { type: "string" },
       "google-count": { type: "string", default: "10" },
       "search-engines": { type: "string" },
       proxy: { type: "string" },
@@ -111,11 +124,15 @@ function writeOutput(pathValue, content) {
 function printMetadata(result, params) {
   const { meta } = result;
   if (!meta) return;
-  console.error("[meta] Method:", params.method);
+  console.error("[meta] Strategy:", meta.strategy || params.strategy || "auto");
   console.error("[meta] Format:", params.format);
   if (params.url) console.error("[meta] Target:", params.url);
   if (params.query) console.error("[meta] Search query:", params.query);
   console.error("[meta] Elapsed:", `${meta.elapsed}s`);
+  if (meta.challenge?.detected) {
+    const status = meta.challenge.resolved ? "resolved" : "BLOCKED";
+    console.error(`[meta] Challenge: ${meta.challenge.label} (${status}, ${meta.challenge.waitedMs}ms)`);
+  }
   if (meta.type === "page") {
     console.error("[meta] Title:", meta.title || "(unknown)");
     console.error("[meta] URL:", meta.url || "(unknown)");
@@ -177,8 +194,12 @@ async function main() {
     params = normalizeEngineRequest(
       {
         ...opts,
+        renderWait: opts["render-wait"],
+        challengeTimeout: opts["challenge-timeout"],
+        bypassChallenges: opts["bypass-challenges"],
         scrollCount: opts["scroll-count"],
         scrollDelay: opts["scroll-delay"],
+        maxResults: opts["max-results"],
         googleCount: opts["google-count"],
         searchEngines: opts["search-engines"],
         listLinks: opts["list-links"],
@@ -195,7 +216,7 @@ async function main() {
     throw err;
   }
 
-  const result = await runInsectEngine(params);
+  const result = await runNsectEngine(params);
   if (!result.success) {
     console.error(`[error] ${result.error}`);
     process.exit(1);

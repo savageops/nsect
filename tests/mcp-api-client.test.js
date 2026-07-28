@@ -9,12 +9,12 @@ import { ENGINE_API_PATH } from "../server/core/contracts.js";
 describe("packages/mcp/api-client", () => {
   it("reads env config with defaults", () => {
     const config = readMcpConfig({
-      INSECT_API_KEY: "sk_test",
+      NSECT_API_KEY: "sk_test",
     });
 
     expect(config.apiBase).toBe("http://localhost:3000");
     expect(config.apiKey).toBe("sk_test");
-    expect(MCP_CONFIG_EXAMPLE.mcpServers.insect).toBeTruthy();
+    expect(MCP_CONFIG_EXAMPLE.mcpServers.nsect).toBeTruthy();
   });
 
   it("does not read removed legacy env aliases", () => {
@@ -101,5 +101,24 @@ describe("packages/mcp/api-client", () => {
     const result = await client.postJson(ENGINE_API_PATH, {});
     expect(result.ok).toBe(false);
     expect(result.errorMessage).toMatch(/timed out/i);
+  });
+
+  it("omits the x-api-key header when no key is configured (local mode)", async () => {
+    let capturedHeaders;
+    const client = createApiClient({
+      apiBase: "http://localhost:3000",
+      apiKey: "",
+      fetchImpl: async (_url, init) => {
+        capturedHeaders = init.headers;
+        return new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+
+    const result = await client.postJson(ENGINE_API_PATH, {});
+    expect(result.ok).toBe(true);
+    expect(capturedHeaders).not.toHaveProperty("x-api-key");
   });
 });

@@ -15,9 +15,9 @@
   HTTP bind port for `serve`.
 - `ADMIN_KEY`
   Admin route key for key-management routes.
-- `INSECT_RS_DB_PATH`
+- `NSECT_RS_DB_PATH`
   SQLite path override for the Rust runtime.
-- `INSECT_RS_BIN`
+- `NSECT_RS_BIN`
   Optional override for the launcher scripts when the bundled binary is not the intended executable.
 
 ## Engine Contract
@@ -50,8 +50,8 @@
   - `--url`
   - `--video-id`
 - Supported methods:
-  - `insect_native`
-  - `insect_signal`
+  - `nsect_native`
+  - `nsect_signal`
   - `invidious`
   - `piped`
   - `yt_dlp`

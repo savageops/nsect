@@ -3,11 +3,11 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill_root="$(cd "$script_dir/.." && pwd)"
-bundled_binary="$skill_root/assets/bin/insect-rs.exe"
-binary="${INSECT_RS_BIN:-$bundled_binary}"
+bundled_binary="$skill_root/assets/bin/nsect-rs.exe"
+binary="${NSECT_RS_BIN:-$bundled_binary}"
 
 if [[ ! -f "$binary" ]]; then
-  echo "insect-rs.exe not found. Expected $bundled_binary or set INSECT_RS_BIN." >&2
+  echo "nsect-rs.exe not found. Expected $bundled_binary or set NSECT_RS_BIN." >&2
   exit 1
 fi
 

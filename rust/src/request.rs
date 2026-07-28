@@ -10,10 +10,27 @@ use crate::{
 };
 
 const DEFAULT_TIMEOUT: i64 = 30;
+const DEFAULT_RENDER_WAIT: i64 = 0;
+const DEFAULT_CHALLENGE_TIMEOUT: i64 = 15;
 const DEFAULT_SCROLL_COUNT: i64 = 20;
 const DEFAULT_SCROLL_DELAY: i64 = 800;
 const DEFAULT_DELAY: i64 = 1000;
-const DEFAULT_GOOGLE_COUNT: i64 = 10;
+const DEFAULT_MAX_RESULTS: i64 = 10;
+
+/// Canonical extraction strategies. `method` is a legacy alias mapped onto
+/// these for backward compatibility; `strategy` is the canonical name.
+pub const STRATEGIES: &[&str] = &["auto", "fast", "patient", "spa", "scroll"];
+
+/// Map a legacy `method` value to the canonical strategy.
+fn method_to_strategy(method: &str) -> &'static str {
+    match method {
+        "direct" => "fast",
+        "wait" | "timed" => "patient",
+        "spa" => "spa",
+        "scroll" => "scroll",
+        _ => "auto",
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct EngineNormalizationOptions {
@@ -61,18 +78,25 @@ pub struct EngineRequestInput {
     pub url: Option<String>,
     pub google: Option<String>,
     pub query: Option<String>,
+    pub strategy: Option<String>,
     pub method: Option<String>,
     pub format: Option<String>,
     pub verbose: Option<bool>,
     pub selector: Option<String>,
     pub timeout: Option<i64>,
+    #[serde(rename = "renderWait", alias = "render_wait")]
+    pub render_wait: Option<i64>,
+    #[serde(rename = "challengeTimeout", alias = "challenge_timeout")]
+    pub challenge_timeout: Option<i64>,
+    #[serde(rename = "bypassChallenges", alias = "bypass_challenges")]
+    pub bypass_challenges: Option<bool>,
     #[serde(rename = "scrollCount", alias = "scroll_count")]
     pub scroll_count: Option<i64>,
     #[serde(rename = "scrollDelay", alias = "scroll_delay")]
     pub scroll_delay: Option<i64>,
     pub delay: Option<i64>,
-    #[serde(rename = "googleCount", alias = "google_count")]
-    pub google_count: Option<i64>,
+    #[serde(rename = "maxResults", alias = "max_results", alias = "googleCount", alias = "google_count")]
+    pub max_results: Option<i64>,
     #[serde(rename = "searchEngines", alias = "search_engines")]
     pub search_engines: Option<StringListInput>,
     pub engines: Option<StringListInput>,
@@ -96,15 +120,21 @@ pub struct EngineRequestInput {
 pub struct NormalizedEngineRequest {
     pub url: Option<String>,
     pub query: Option<String>,
+    /// Canonical extraction strategy (auto/fast/patient/spa/scroll).
+    pub strategy: String,
+    /// Legacy alias of strategy, kept for output compatibility.
     pub method: String,
     pub format: String,
     pub verbose: bool,
     pub selector: Option<String>,
     pub timeout: u64,
+    pub render_wait: u64,
+    pub challenge_timeout: u64,
+    pub bypass_challenges: bool,
     pub scroll_count: u32,
     pub scroll_delay: u64,
     pub delay: u64,
-    pub google_count: u32,
+    pub max_results: u32,
     pub search_engines: Vec<String>,
     pub proxy: Option<String>,
     pub cookies: Vec<CookieParam>,
@@ -149,9 +179,14 @@ pub fn normalize_engine_request(
         assert_absolute_url(target_url)?;
     }
 
-    let method = normalize_method(input.method)?;
+    let method_value = input.method.clone();
+    let strategy = normalize_strategy(input.strategy, input.method)?;
     let selector = optional_string(input.selector);
-    if search_query.is_none() && method == "wait" && selector.is_none() {
+    // Legacy `method=wait` without a selector is still a validation error.
+    if search_query.is_none()
+        && method_value.as_deref() == Some("wait")
+        && selector.is_none()
+    {
         return Err(validation_error(
             "method='wait' requires a non-empty 'selector'",
             "selector",
@@ -185,12 +220,28 @@ pub fn normalize_engine_request(
 
     Ok(NormalizedEngineRequest {
         url,
-        query: search_query,
-        method,
+        query: search_query.clone(),
+        strategy: strategy.to_string(),
+        method: strategy.to_string(),
         format: normalize_format(input.format)?,
         verbose: input.verbose.unwrap_or(false),
         selector,
         timeout: to_integer(input.timeout, "timeout", 1, 180, DEFAULT_TIMEOUT)? as u64,
+        render_wait: to_integer(
+            input.render_wait,
+            "renderWait",
+            0,
+            120,
+            DEFAULT_RENDER_WAIT,
+        )? as u64,
+        challenge_timeout: to_integer(
+            input.challenge_timeout,
+            "challengeTimeout",
+            0,
+            120,
+            DEFAULT_CHALLENGE_TIMEOUT,
+        )? as u64,
+        bypass_challenges: input.bypass_challenges.unwrap_or(false),
         scroll_count: to_integer(
             input.scroll_count,
             "scrollCount",
@@ -206,12 +257,12 @@ pub fn normalize_engine_request(
             DEFAULT_SCROLL_DELAY,
         )? as u64,
         delay: to_integer(input.delay, "delay", 0, 30_000, DEFAULT_DELAY)? as u64,
-        google_count: to_integer(
-            input.google_count,
-            "googleCount",
+        max_results: to_integer(
+            input.max_results,
+            "maxResults",
             1,
             50,
-            DEFAULT_GOOGLE_COUNT,
+            DEFAULT_MAX_RESULTS,
         )? as u32,
         search_engines,
         proxy: optional_string(input.proxy),
@@ -276,19 +327,42 @@ fn parse_cookies(input: Option<CookiesInput>) -> Result<Vec<CookieParam>, Reques
     }
 }
 
-fn normalize_method(value: Option<String>) -> Result<String, RequestValidationError> {
-    let method = optional_string(value).unwrap_or_else(|| "direct".to_string());
-    if SUPPORTED_METHODS
-        .iter()
-        .any(|candidate| candidate == &method.as_str())
-    {
-        Ok(method)
-    } else {
-        Err(validation_error(
+/// Normalize the extraction strategy. Accepts the canonical `strategy` field
+/// or the legacy `method` field (mapped to its strategy equivalent). Collapses
+/// the old 5-method decision tree into one concept with a smart `auto` default.
+fn normalize_strategy(
+    strategy_value: Option<String>,
+    method_value: Option<String>,
+) -> Result<&'static str, RequestValidationError> {
+    if let Some(strategy) = optional_string(strategy_value) {
+        if STRATEGIES.iter().any(|candidate| *candidate == strategy.as_str()) {
+            // SAFETY: matched against STRATEGIES, so leak the static slice.
+            return Ok(STRATEGIES
+                .iter()
+                .copied()
+                .find(|candidate| *candidate == strategy.as_str())
+                .unwrap_or("auto"));
+        }
+        return Err(validation_error(
+            &format!("Unknown strategy. Valid: {}", STRATEGIES.join(", ")),
+            "strategy",
+        ));
+    }
+
+    if let Some(method) = optional_string(method_value) {
+        if SUPPORTED_METHODS
+            .iter()
+            .any(|candidate| *candidate == method.as_str())
+        {
+            return Ok(method_to_strategy(&method));
+        }
+        return Err(validation_error(
             &format!("Unknown method. Valid: {}", SUPPORTED_METHODS.join(", ")),
             "method",
-        ))
+        ));
     }
+
+    Ok("auto")
 }
 
 fn normalize_format(value: Option<String>) -> Result<String, RequestValidationError> {
@@ -386,9 +460,13 @@ mod tests {
         .unwrap();
 
         assert_eq!(normalized.url.as_deref(), Some("https://example.com"));
-        assert_eq!(normalized.method, "direct");
+        assert_eq!(normalized.strategy, "auto");
+        assert_eq!(normalized.method, "auto");
         assert_eq!(normalized.format, "text");
         assert_eq!(normalized.timeout, 30);
+        assert_eq!(normalized.render_wait, 0);
+        assert_eq!(normalized.challenge_timeout, 15);
+        assert_eq!(normalized.max_results, 10);
         assert_eq!(
             normalized.search_engines,
             vec!["duckduckgo", "bing", "brave", "google"]
@@ -400,7 +478,7 @@ mod tests {
         let normalized = normalize_engine_request(
             EngineRequestInput {
                 google: Some("site:example.com crawler".to_string()),
-                google_count: Some(5),
+                max_results: Some(5),
                 ..EngineRequestInput::default()
             },
             EngineNormalizationOptions {
@@ -414,7 +492,7 @@ mod tests {
             normalized.query.as_deref(),
             Some("site:example.com crawler")
         );
-        assert_eq!(normalized.google_count, 5);
+        assert_eq!(normalized.max_results, 5);
     }
 
     #[test]

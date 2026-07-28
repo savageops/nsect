@@ -6,6 +6,7 @@ use chrono::Utc;
 use rand::distr::{Alphanumeric, SampleString};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
+use sha2::{Sha256, Digest};
 
 use crate::contracts::MIN_SEARCH_COOLDOWN_SECONDS;
 
@@ -14,15 +15,52 @@ const MAX_RATE_LIMIT: i64 = 10_000;
 const MAX_SEARCH_COOLDOWN_SECONDS: i64 = 3600;
 const RATE_LIMIT_WINDOW_MS: i64 = 60_000;
 
+/// Hash a plaintext API key into its storage form (sha-256, hex). Used both at
+/// creation (to persist) and at validation (to look up). The hash is the
+/// canonical identifier — the plaintext is never stored or queried.
+pub fn hash_key(api_key: &str) -> String {
+    let digest = Sha256::digest(api_key.as_bytes());
+    hex::encode_hex(digest)
+}
+
+/// Constant-time comparison of a presented secret against the expected value.
+/// Both are sha-256 hashed first so lengths align and timing cannot leak the
+/// plaintext length or content.
+pub fn safe_compare_secret(presented: &str, expected: &str) -> bool {
+    use subtle::ConstantTimeEq;
+    let a = Sha256::digest(presented.as_bytes());
+    let b = Sha256::digest(expected.as_bytes());
+    a.ct_eq(&b).into()
+}
+
+// Minimal inline hex encoder to avoid pulling a hex crate dependency.
+mod hex {
+    pub fn encode_hex(bytes: impl AsRef<[u8]>) -> String {
+        let bytes = bytes.as_ref();
+        let mut out = String::with_capacity(bytes.len() * 2);
+        for byte in bytes {
+            out.push_str(&format!("{byte:02x}"));
+        }
+        out
+    }
+}
+
 #[derive(Clone)]
 pub struct KeyStore {
     conn: Arc<Mutex<Connection>>,
 }
 
+/// A key record. At creation time `api_key` carries the plaintext secret
+/// (returned once to the caller); in all persisted/queried contexts only the
+/// `key_hash` is stored. The `key_hash` field is the masked hash prefix in
+/// public listings.
 #[derive(Debug, Clone, Serialize)]
 pub struct KeyRecord {
-    #[serde(rename = "apiKey")]
-    pub api_key: String,
+    /// Plaintext secret — populated ONLY at creation, never persisted.
+    #[serde(rename = "apiKey", skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(rename = "keyHash")]
+    pub key_hash: String,
     pub label: String,
     pub active: bool,
     #[serde(rename = "rateLimit")]
@@ -87,10 +125,25 @@ impl KeyStore {
             .with_context(|| format!("failed to open SQLite database {}", path.display()))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
+
+        // Clean-slate migration: if the old plaintext `api_key` schema exists,
+        // drop and recreate. Local keys are ephemeral (data/ is gitignored).
+        {
+            let mut stmt = conn.prepare("PRAGMA table_info(api_keys)")?;
+            let has_old_column = stmt
+                .query_map([], |row| row.get::<_, String>(1))?
+                .filter_map(Result::ok)
+                .any(|name| name == "api_key");
+            if has_old_column {
+                conn.execute_batch("DROP TABLE IF EXISTS api_keys")?;
+            }
+        }
+
+        // Clean-slate schema: key_hash is the primary key, not the raw secret.
         conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS api_keys (
-              api_key TEXT PRIMARY KEY,
+              key_hash TEXT PRIMARY KEY,
               label TEXT NOT NULL,
               active INTEGER NOT NULL DEFAULT 1,
               rate_limit INTEGER NOT NULL,
@@ -116,6 +169,7 @@ impl KeyStore {
 
     pub fn create_key(&self, input: CreateKeyInput) -> Result<KeyRecord> {
         let api_key = generate_api_key();
+        let key_hash = hash_key(&api_key);
         let label = input.label.unwrap_or_else(|| "unnamed".to_string());
         let rate_limit = normalize_rate_limit(input.rate_limit.unwrap_or(DEFAULT_RATE_LIMIT));
         let search_cooldown_seconds = normalize_search_cooldown(
@@ -136,13 +190,13 @@ impl KeyStore {
             conn.execute(
                 r#"
                 INSERT INTO api_keys (
-                  api_key, label, active, rate_limit, search_cooldown_seconds,
+                  key_hash, label, active, rate_limit, search_cooldown_seconds,
                   use_count, created_at, last_used, expires_at, expired_at, revoked_at,
                   window_start, window_count, last_search_at, last_search_at_iso
                 ) VALUES (?1, ?2, 1, ?3, ?4, 0, ?5, NULL, ?6, NULL, NULL, NULL, 0, NULL, NULL)
                 "#,
                 params![
-                    api_key,
+                    key_hash,
                     label,
                     rate_limit,
                     search_cooldown_seconds,
@@ -152,8 +206,13 @@ impl KeyStore {
             )?;
         }
 
-        self.get_key(&api_key, false)?
-            .ok_or_else(|| anyhow!("created key could not be re-read"))
+        // Re-read by hash (masked) and inject the plaintext into the returned
+        // record so the caller sees it exactly once.
+        let mut record = self
+            .get_key_by_hash(&key_hash, true)?
+            .ok_or_else(|| anyhow!("created key could not be re-read"))?;
+        record.api_key = Some(api_key);
+        Ok(record)
     }
 
     pub fn list_keys(&self) -> Result<Vec<KeyRecord>> {
@@ -163,7 +222,7 @@ impl KeyStore {
             .map_err(|_| anyhow!("key database mutex poisoned"))?;
         let mut stmt = conn.prepare(
             r#"
-            SELECT api_key, label, active, rate_limit, search_cooldown_seconds, use_count,
+            SELECT key_hash, label, active, rate_limit, search_cooldown_seconds, use_count,
                    created_at, last_used, expires_at, expired_at, revoked_at,
                    window_start, window_count, last_search_at, last_search_at_iso
             FROM api_keys
@@ -171,7 +230,7 @@ impl KeyStore {
             "#,
         )?;
 
-        let rows = stmt.query_map([], |row| map_row(row, true))?;
+        let rows = stmt.query_map([], |row| map_row(row))?;
         let mut out = Vec::new();
         for row in rows {
             out.push(row?);
@@ -179,39 +238,55 @@ impl KeyStore {
         Ok(out)
     }
 
-    pub fn get_key(&self, api_key: &str, masked: bool) -> Result<Option<KeyRecord>> {
+    /// Look up a key by its plaintext (hashed internally). Used by admin
+    /// inspect-by-key routes. Returns the masked-hash projection.
+    pub fn get_key(&self, api_key: &str, _masked: bool) -> Result<Option<KeyRecord>> {
+        let key_hash = hash_key(api_key);
+        self.get_key_by_hash(&key_hash, true)
+    }
+
+    fn get_key_by_hash(&self, key_hash: &str, masked: bool) -> Result<Option<KeyRecord>> {
         let conn = self
             .conn
             .lock()
             .map_err(|_| anyhow!("key database mutex poisoned"))?;
         conn.query_row(
             r#"
-            SELECT api_key, label, active, rate_limit, search_cooldown_seconds, use_count,
+            SELECT key_hash, label, active, rate_limit, search_cooldown_seconds, use_count,
                    created_at, last_used, expires_at, expired_at, revoked_at,
                    window_start, window_count, last_search_at, last_search_at_iso
             FROM api_keys
-            WHERE api_key = ?1
+            WHERE key_hash = ?1
             "#,
-            params![api_key],
-            |row| map_row(row, masked),
+            params![key_hash],
+            |row| map_row(row),
         )
         .optional()
+        .map(|opt| opt.map(|mut r| {
+            if !masked {
+                r.key_hash = key_hash.to_string();
+            }
+            r
+        }))
         .map_err(Into::into)
     }
 
     pub fn revoke_key(&self, api_key: &str) -> Result<bool> {
+        let key_hash = hash_key(api_key);
         let conn = self
             .conn
             .lock()
             .map_err(|_| anyhow!("key database mutex poisoned"))?;
         let now = Utc::now().to_rfc3339();
         let changed = conn.execute(
-            "UPDATE api_keys SET active = 0, revoked_at = ?2 WHERE api_key = ?1",
-            params![api_key, now],
+            "UPDATE api_keys SET active = 0, revoked_at = ?2 WHERE key_hash = ?1",
+            params![key_hash, now],
         )?;
         Ok(changed > 0)
     }
 
+    /// Validate a presented plaintext key. The key is hashed and looked up by
+    /// hash; the plaintext never touches the query path after creation.
     pub fn validate_key(
         &self,
         api_key: &str,
@@ -226,6 +301,7 @@ impl KeyStore {
                 cooldown_seconds: None,
             });
         }
+        let key_hash = hash_key(api_key);
 
         let conn = self.conn.lock().map_err(|_| ValidationFailure {
             status: 500,
@@ -248,14 +324,14 @@ impl KeyStore {
         let mut record = tx
             .query_row(
                 r#"
-                SELECT api_key, label, active, rate_limit, search_cooldown_seconds, use_count,
+                SELECT key_hash, label, active, rate_limit, search_cooldown_seconds, use_count,
                        created_at, last_used, expires_at, expired_at, revoked_at,
                        window_start, window_count, last_search_at, last_search_at_iso
                 FROM api_keys
-                WHERE api_key = ?1
+                WHERE key_hash = ?1
                 "#,
-                params![api_key],
-                |row| map_row(row, false),
+                params![key_hash],
+                |row| map_row(row),
             )
             .optional()
             .map_err(|_| ValidationFailure {
@@ -289,8 +365,8 @@ impl KeyStore {
         if let Some(expires_at) = record.expires_at {
             if now_ms > expires_at {
                 tx.execute(
-                    "UPDATE api_keys SET active = 0, expired_at = ?2 WHERE api_key = ?1",
-                    params![api_key, now_iso],
+                    "UPDATE api_keys SET active = 0, expired_at = ?2 WHERE key_hash = ?1",
+                    params![key_hash, now_iso],
                 )
                 .map_err(|_| ValidationFailure {
                     status: 500,
@@ -372,10 +448,10 @@ impl KeyStore {
                 window_count = ?5,
                 last_search_at = ?6,
                 last_search_at_iso = ?7
-            WHERE api_key = ?1
+            WHERE key_hash = ?1
             "#,
             params![
-                api_key,
+                key_hash,
                 record.use_count,
                 record.last_used,
                 record.window_start,
@@ -402,10 +478,11 @@ impl KeyStore {
     }
 }
 
-fn map_row(row: &rusqlite::Row<'_>, masked: bool) -> rusqlite::Result<KeyRecord> {
-    let api_key: String = row.get(0)?;
+fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<KeyRecord> {
+    let key_hash: String = row.get(0)?;
     Ok(KeyRecord {
-        api_key: if masked { mask_key(&api_key) } else { api_key },
+        api_key: None,
+        key_hash: mask_key_hash(&key_hash),
         label: row.get(1)?,
         active: row.get::<_, i64>(2)? == 1,
         rate_limit: row.get(3)?,
@@ -431,11 +508,14 @@ fn normalize_search_cooldown(value: i64) -> i64 {
     value.clamp(MIN_SEARCH_COOLDOWN_SECONDS, MAX_SEARCH_COOLDOWN_SECONDS)
 }
 
-fn mask_key(value: &str) -> String {
+/// Public-facing key identifier: a short prefix of the hash. The plaintext
+/// secret is never exposed — only enough of the hash to let an operator
+/// distinguish keys without revealing usable credential material.
+fn mask_key_hash(value: &str) -> String {
     if value.len() <= 12 {
-        format!("{value}...")
+        format!("{value}…")
     } else {
-        format!("{}...", &value[..12])
+        format!("{}…", &value[..12])
     }
 }
 
@@ -450,7 +530,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn creates_and_reads_key() {
+    fn creates_and_reads_key_with_hashed_storage() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("keys.sqlite");
         let store = KeyStore::open(&path).unwrap();
@@ -463,8 +543,46 @@ mod tests {
             })
             .unwrap();
 
-        assert!(created.api_key.starts_with("sk_"));
-        let fetched = store.get_key(&created.api_key, false).unwrap().unwrap();
-        assert_eq!(fetched.label, "test");
+        // Plaintext returned once at creation.
+        let plaintext = created.api_key.expect("plaintext at creation");
+        assert!(plaintext.starts_with("sk_"));
+        // The keyHash is the masked hash, not the plaintext.
+        assert!(created.key_hash.ends_with('…'));
+        assert!(!created.key_hash.starts_with("sk_"));
+
+        // Validation via the plaintext works (hashes internally).
+        store
+            .validate_key(&plaintext, ValidationContext { enforce_search_cooldown: false })
+            .expect("valid key validates");
+    }
+
+    #[test]
+    fn hash_key_is_deterministic() {
+        let h1 = hash_key("sk_test123");
+        let h2 = hash_key("sk_test123");
+        assert_eq!(h1, h2);
+        assert_ne!(h1, hash_key("sk_different"));
+    }
+
+    #[test]
+    fn safe_compare_secret_is_constant_time() {
+        assert!(safe_compare_secret("secret", "secret"));
+        assert!(!safe_compare_secret("secret", "wrong"));
+        assert!(!safe_compare_secret("", "secret"));
+    }
+
+    #[test]
+    fn revoked_key_is_rejected() {
+        let dir = tempdir().unwrap();
+        let store = KeyStore::open(&dir.path().join("k.sqlite")).unwrap();
+        let created = store
+            .create_key(CreateKeyInput { label: None, rate_limit: None, search_cooldown_seconds: None, expires_in_seconds: None })
+            .unwrap();
+        let plaintext = created.api_key.unwrap();
+        store.revoke_key(&plaintext).unwrap();
+        let result = store.validate_key(&plaintext, ValidationContext { enforce_search_cooldown: false });
+        assert!(result.is_err());
+        let fail = result.unwrap_err();
+        assert_eq!(fail.code, "revoked");
     }
 }

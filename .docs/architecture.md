@@ -1,10 +1,10 @@
-# Insect Architecture
+# Nsect Architecture
 
 ## Structure
 
 ```text
-insect-js/
-|-- insect-engine.js                # CLI entrypoint
+nsect-js/
+|-- nsect-engine.js                # CLI entrypoint
 |-- api.js                          # API server entrypoint
 |-- server/
 |   |-- index.js                    # Express app wiring + route mounting
@@ -51,12 +51,12 @@ insect-js/
 - `server/core/request.js` is the source of truth for request shape and guardrails.
 - `server/core/youtube-transcript.js` is the request + execution contract for transcript fallback flows.
 - `server/core/contracts.js` carries canonical API paths and the minimum search cooldown.
-- CLI (`insect-engine.js`) and API route (`server/routes/engine.js`) both rely on the shared engine validator.
+- CLI (`nsect-engine.js`) and API route (`server/routes/engine.js`) both rely on the shared engine validator.
 - MCP tools call one hardened API client (`packages/mcp/api-client.js`) and return explicit tool errors.
 
 ## Runtime Modes
 
-1. CLI mode (`node insect-engine.js ...`)
+1. CLI mode (`node nsect-engine.js ...`)
 2. API mode (`node api.js`) for extraction and transcript endpoints
 3. MCP mode (`node packages/mcp/index.js`)
 
@@ -89,7 +89,7 @@ Current native ownership:
 ## Auth and Key Lifecycle
 
 - API keys live in `data/keys.sqlite`.
-- Rust runtime key state defaults to `rust/data/keys.sqlite` and can be overridden with `INSECT_RS_DB_PATH`.
+- Rust runtime key state defaults to `rust/data/keys.sqlite` and can be overridden with `NSECT_RS_DB_PATH`.
 - Validation includes active/revoked/expired checks and per-key rate limiting.
 - Search requests enforce a minimum six-second cooldown per key.
 - SQLite WAL is enabled for safer write durability and concurrent request handling.

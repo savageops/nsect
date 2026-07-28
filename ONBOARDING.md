@@ -1,12 +1,12 @@
-# Insect Onboarding and Setup Guide
+# Nsect Onboarding and Setup Guide
 
 ## Who This Guide Is For
 
-Anyone who needs to run, develop, or integrate Insect:
+Anyone who needs to run, develop, or integrate Nsect:
 
 - backend/API maintainers
 - MCP/tooling integrators
-- operators hosting Insect as a SaaS API
+- operators hosting Nsect as a SaaS API
 
 ## Prerequisites
 
@@ -76,15 +76,15 @@ Rust runtime env:
 
 - `PORT` controls the listening port
 - `ADMIN_KEY` protects admin routes
-- `INSECT_RS_DB_PATH` overrides the Rust SQLite location
+- `NSECT_RS_DB_PATH` overrides the Rust SQLite location
 
 Packaged runtime skill:
 
-- `packages/skills/insect-rs-runtime`
-- alias trigger skill: `packages/skills/insect`
-- launcher script: `packages/skills/insect-rs-runtime/scripts/run-insect-rs.ps1`
-- transcript capture helper: `packages/skills/insect-rs-runtime/scripts/save-insect-transcript.ps1`
-- bundled binary: `packages/skills/insect-rs-runtime/assets/bin/insect-rs.exe`
+- `packages/skills/nsect-rs-runtime`
+- alias trigger skill: `packages/skills/nsect`
+- launcher script: `packages/skills/nsect-rs-runtime/scripts/run-nsect-rs.ps1`
+- transcript capture helper: `packages/skills/nsect-rs-runtime/scripts/save-nsect-transcript.ps1`
+- bundled binary: `packages/skills/nsect-rs-runtime/assets/bin/nsect-rs.exe`
 
 Cross-runtime operator scripts:
 
@@ -121,7 +121,7 @@ curl -sS http://localhost:3000/api/youtube/transcript \
   -d '{
     "videoId":"dQw4w9WgXcQ",
     "format":"text",
-    "methods":["insect_native","insect_signal","invidious","piped","yt_dlp"]
+    "methods":["nsect_native","nsect_signal","invidious","piped","yt_dlp"]
   }'
 ```
 
@@ -130,16 +130,16 @@ curl -sS http://localhost:3000/api/youtube/transcript \
 Set env first:
 
 ```bash
-export INSECT_API_URL=http://localhost:3000
-export INSECT_API_KEY=sk_xxx
+export NSECT_API_URL=http://localhost:3000
+export NSECT_API_KEY=sk_xxx
 ```
 
 Optional transcript adapter tuning:
 
 ```bash
-export INSECT_INVIDIOUS_INSTANCES=https://invidious.nerdvpn.de,https://yewtu.be
-export INSECT_PIPED_INSTANCES=https://pipedapi.kavin.rocks,https://pipedapi.adminforge.de
-export INSECT_YTDLP_COMMANDS=yt-dlp,yt-dlp.exe
+export NSECT_INVIDIOUS_INSTANCES=https://invidious.nerdvpn.de,https://yewtu.be
+export NSECT_PIPED_INSTANCES=https://pipedapi.kavin.rocks,https://pipedapi.adminforge.de
+export NSECT_YTDLP_COMMANDS=yt-dlp,yt-dlp.exe
 ```
 
 Then run:
@@ -150,7 +150,7 @@ npm run mcp
 
 You should see:
 
-- `insect MCP server running on stdio`
+- `nsect MCP server running on stdio`
 
 ## Generate MCP Client Config
 
@@ -189,17 +189,17 @@ powershell -ExecutionPolicy Bypass -File scripts/test-rust.ps1
 - Wait for the retry window from the response and retry
 
 4. MCP exits immediately
-- Verify `INSECT_API_KEY` is set
+- Verify `NSECT_API_KEY` is set
 - Verify API is reachable from your MCP runtime environment
 
 5. Admin key routes failing
 - Check `ADMIN_KEY` in `.env` and request header `x-admin-key`
 
 6. Rust key state appears in the wrong location
-- Set `INSECT_RS_DB_PATH` before running `scripts/run-rust.ps1` or `scripts/run-rust.sh`
+- Set `NSECT_RS_DB_PATH` before running `scripts/run-rust.ps1` or `scripts/run-rust.sh`
 - Default Rust path is `rust/data/keys.sqlite`
 
 6. Transcript route returns `502`
-- The adapter chain exhausted all providers (`insect_native`, `insect_signal`, `invidious`, `piped`, `yt_dlp`)
+- The adapter chain exhausted all providers (`nsect_native`, `nsect_signal`, `invidious`, `piped`, `yt_dlp`)
 - Ensure outbound network access to YouTube
-- Ensure `yt-dlp` is installed or reachable via `INSECT_YTDLP_COMMANDS`
+- Ensure `yt-dlp` is installed or reachable via `NSECT_YTDLP_COMMANDS`

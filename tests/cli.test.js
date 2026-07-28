@@ -5,12 +5,12 @@ import { promisify } from "node:util";
 const exec = promisify(execFile);
 const itLive = process.env.LIVE_INTEGRATION === "1" ? it : it.skip;
 
-describe("CLI insect-engine.js", () => {
+describe("CLI nsect-engine.js", () => {
   it("shows help with --help flag", async () => {
-    const { stdout } = await exec("node", ["insect-engine.js", "--help"], {
+    const { stdout } = await exec("node", ["nsect-engine.js", "--help"], {
       cwd: process.cwd(),
     });
-    expect(stdout).toContain("insect");
+    expect(stdout).toContain("nsect");
     expect(stdout).toContain("--url");
     expect(stdout).toContain("--method");
     expect(stdout).toContain("--format");
@@ -20,7 +20,7 @@ describe("CLI insect-engine.js", () => {
 
   it("exits with error when no URL provided", async () => {
     try {
-      await exec("node", ["insect-engine.js"], { cwd: process.cwd() });
+      await exec("node", ["nsect-engine.js"], { cwd: process.cwd() });
       expect.unreachable("Should have thrown");
     } catch (err) {
       expect(err.code).toBe(1);
@@ -30,7 +30,7 @@ describe("CLI insect-engine.js", () => {
 
   it("exits with error for invalid method", async () => {
     try {
-      await exec("node", ["insect-engine.js", "--url", "https://example.com", "--method", "bogus"], {
+      await exec("node", ["nsect-engine.js", "--url", "https://example.com", "--method", "bogus"], {
         cwd: process.cwd(),
       });
       expect.unreachable("Should have thrown");
@@ -42,7 +42,7 @@ describe("CLI insect-engine.js", () => {
 
   it("exits with error for invalid format", async () => {
     try {
-      await exec("node", ["insect-engine.js", "--url", "https://example.com", "--format", "bogus"], {
+      await exec("node", ["nsect-engine.js", "--url", "https://example.com", "--format", "bogus"], {
         cwd: process.cwd(),
       });
       expect.unreachable("Should have thrown");
@@ -55,7 +55,7 @@ describe("CLI insect-engine.js", () => {
   itLive("scrapes example.com and outputs text (live)", async () => {
     const { stdout } = await exec(
       "node",
-      ["insect-engine.js", "--url", "https://example.com", "--format", "text", "--timeout", "15"],
+      ["nsect-engine.js", "--url", "https://example.com", "--format", "text", "--timeout", "15"],
       { cwd: process.cwd() },
     );
     expect(stdout.length).toBeGreaterThan(0);
@@ -65,7 +65,7 @@ describe("CLI insect-engine.js", () => {
   itLive("scrapes with --format json (live)", async () => {
     const { stdout } = await exec(
       "node",
-      ["insect-engine.js", "--url", "https://example.com", "--format", "json", "--timeout", "15"],
+      ["nsect-engine.js", "--url", "https://example.com", "--format", "json", "--timeout", "15"],
       { cwd: process.cwd() },
     );
     const parsed = JSON.parse(stdout);
@@ -76,7 +76,7 @@ describe("CLI insect-engine.js", () => {
   itLive("scrapes with --format links (live)", async () => {
     const { stdout } = await exec(
       "node",
-      ["insect-engine.js", "--url", "https://example.com", "--format", "links", "--timeout", "15"],
+      ["nsect-engine.js", "--url", "https://example.com", "--format", "links", "--timeout", "15"],
       { cwd: process.cwd() },
     );
     expect(stdout).toContain("http");
@@ -85,7 +85,7 @@ describe("CLI insect-engine.js", () => {
   itLive("scrapes with --format markdown (live)", async () => {
     const { stdout } = await exec(
       "node",
-      ["insect-engine.js", "--url", "https://example.com", "--format", "markdown", "--timeout", "15"],
+      ["nsect-engine.js", "--url", "https://example.com", "--format", "markdown", "--timeout", "15"],
       { cwd: process.cwd() },
     );
     expect(stdout.length).toBeGreaterThan(0);
@@ -94,7 +94,7 @@ describe("CLI insect-engine.js", () => {
   itLive("prints metadata to stderr with --metadata flag (live)", async () => {
     const { stderr } = await exec(
       "node",
-      ["insect-engine.js", "--url", "https://example.com", "--format", "text", "--metadata", "--timeout", "15"],
+      ["nsect-engine.js", "--url", "https://example.com", "--format", "text", "--metadata", "--timeout", "15"],
       { cwd: process.cwd() },
     );
     expect(stderr).toContain("[meta]");
@@ -107,7 +107,7 @@ describe("CLI insect-engine.js", () => {
     const { stdout } = await exec(
       "node",
       [
-        "insect-engine.js",
+        "nsect-engine.js",
         "--query",
         "example",
         "--google",
@@ -134,7 +134,7 @@ describe("CLI insect-engine.js", () => {
 
     await exec(
       "node",
-      ["insect-engine.js", "--url", "https://example.com", "--format", "text", "--output", outputPath, "--timeout", "15"],
+      ["nsect-engine.js", "--url", "https://example.com", "--format", "text", "--output", outputPath, "--timeout", "15"],
       { cwd: process.cwd() },
     );
 

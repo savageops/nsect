@@ -1,19 +1,19 @@
 ---
-name: insect-rs-runtime
-description: Canonical Insect skill for the compiled Rust runtime. Use when the user says `insect`, `insect skill`, `insect runtime`, `insect-rs`, `insect rs runtime`, or asks Codex to use Insect for crawling, scraping, page extraction, search extraction, SERP retrieval, web research, YouTube transcript retrieval, runtime validation, CLI help inspection, HTTP serving, or native-binary packaging. Route broad "use insect to search/scour the web or YouTube" requests to this skill unless the user explicitly names a different Insect surface.
+name: nsect-rs-runtime
+description: Canonical Nsect skill for the compiled Rust runtime. Use when the user says `nsect`, `nsect skill`, `nsect runtime`, `nsect-rs`, `nsect rs runtime`, or asks Codex to use Nsect for crawling, scraping, page extraction, search extraction, SERP retrieval, web research, YouTube transcript retrieval, runtime validation, CLI help inspection, HTTP serving, or native-binary packaging. Route broad "use nsect to search/scour the web or YouTube" requests to this skill unless the user explicitly names a different Nsect surface.
 ---
 
-# Insect RS Runtime
+# Nsect RS Runtime
 
 ## Overview
 
-Use the bundled Windows release binary and thin wrapper scripts to operate `insect-rs` without reconstructing the CLI contract from source. Keep the flow deterministic: discover the command surface, choose the correct mode, run through the wrapper, and verify the resulting payload or artifact.
+Use the bundled Windows release binary and thin wrapper scripts to operate `nsect-rs` without reconstructing the CLI contract from source. Keep the flow deterministic: discover the command surface, choose the correct mode, run through the wrapper, and verify the resulting payload or artifact.
 
 ## Interpretation Rules
 
-- Treat this as the default and canonical Insect skill.
-- If the user says `use insect`, `use the insect skill`, or `use insect runtime`, select this skill unless they explicitly point at another Insect package.
-- If the user asks for web research, search harvesting, page scraping, or YouTube transcript collection with Insect, use this skill and map the request to the correct command surface.
+- Treat this as the default and canonical Nsect skill.
+- If the user says `use nsect`, `use the nsect skill`, or `use nsect runtime`, select this skill unless they explicitly point at another Nsect package.
+- If the user asks for web research, search harvesting, page scraping, or YouTube transcript collection with Nsect, use this skill and map the request to the correct command surface.
 - Do not stop at "the skill exists"; route the task into `engine`, `transcribe-youtube`, or `serve`.
 - For repeated research harvests, prefer serialized runs and explicit output files.
 
@@ -28,12 +28,12 @@ Use the bundled Windows release binary and thin wrapper scripts to operate `inse
 - Runtime health checks, local API use, or SaaS-host verification
   Use `serve`
 - Help, discovery, or contract inspection
-  Use `scripts/run-insect-rs.ps1 --help` and then the relevant subcommand help
+  Use `scripts/run-nsect-rs.ps1 --help` and then the relevant subcommand help
 
 ## Quick Start
 
 1. Confirm the runtime surface.
-   Run `scripts/run-insect-rs.ps1 --help`.
+   Run `scripts/run-nsect-rs.ps1 --help`.
 2. Pick a mode.
    Use `serve` for the HTTP API, `engine` for page or search extraction, `transcribe-youtube` for transcript retrieval.
 3. Run through the wrapper instead of hardcoding a binary path.
@@ -44,8 +44,8 @@ Use the bundled Windows release binary and thin wrapper scripts to operate `inse
 ### 1. Confirm the runtime contract
 
 - Read [references/runtime-contract.md](references/runtime-contract.md) when you need the exact modes, flags, environment variables, or output behavior.
-- Use `scripts/run-insect-rs.ps1 --help` first when the task is exploratory.
-- Treat `PORT`, `ADMIN_KEY`, and `INSECT_RS_DB_PATH` as the canonical runtime environment names.
+- Use `scripts/run-nsect-rs.ps1 --help` first when the task is exploratory.
+- Treat `PORT`, `ADMIN_KEY`, and `NSECT_RS_DB_PATH` as the canonical runtime environment names.
 
 ### 2. Choose the execution path
 
@@ -57,11 +57,11 @@ Use the bundled Windows release binary and thin wrapper scripts to operate `inse
 ### 3. Run through the wrapper scripts
 
 - Windows:
-  - `scripts/run-insect-rs.ps1`
-  - `scripts/smoke-insect-rs.ps1`
+  - `scripts/run-nsect-rs.ps1`
+  - `scripts/smoke-nsect-rs.ps1`
 - Bash shells on Windows:
-  - `scripts/run-insect-rs.sh`
-- The wrappers use `assets/bin/insect-rs.exe` by default and switch to `INSECT_RS_BIN` only when you explicitly provide that override.
+  - `scripts/run-nsect-rs.sh`
+- The wrappers use `assets/bin/nsect-rs.exe` by default and switch to `NSECT_RS_BIN` only when you explicitly provide that override.
 - Do not hardcode absolute user-specific binary paths when the wrapper already gives you a stable launch contract.
 
 ### 4. Verify the result at the correct surface
@@ -76,31 +76,31 @@ Use the bundled Windows release binary and thin wrapper scripts to operate `inse
 ### Serve the API
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-insect-rs.ps1 serve
+powershell -ExecutionPolicy Bypass -File .\scripts\run-nsect-rs.ps1 serve
 ```
 
 ### Extract a page to markdown
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-insect-rs.ps1 engine --url https://example.com --format markdown --metadata
+powershell -ExecutionPolicy Bypass -File .\scripts\run-nsect-rs.ps1 engine --url https://example.com --format markdown --metadata
 ```
 
 ### Run search extraction with explicit engine order
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-insect-rs.ps1 engine --query "open source crawling frameworks" --search-engines duckduckgo,bing,brave,google --format json
+powershell -ExecutionPolicy Bypass -File .\scripts\run-nsect-rs.ps1 engine --query "open source crawling frameworks" --search-engines duckduckgo,bing,brave,google --format json
 ```
 
 ### Capture page artifacts
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-insect-rs.ps1 engine --url https://example.com --format text --screenshot .\out\page.png --pdf .\out\page.pdf --output .\out\page.txt --metadata
+powershell -ExecutionPolicy Bypass -File .\scripts\run-nsect-rs.ps1 engine --url https://example.com --format text --screenshot .\out\page.png --pdf .\out\page.pdf --output .\out\page.txt --metadata
 ```
 
 ### Fetch a transcript
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-insect-rs.ps1 transcribe-youtube --video-id dQw4w9WgXcQ --format json --include-segments
+powershell -ExecutionPolicy Bypass -File .\scripts\run-nsect-rs.ps1 transcribe-youtube --video-id dQw4w9WgXcQ --format json --include-segments
 ```
 
 ## Patterns
@@ -116,7 +116,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run-insect-rs.ps1 transcribe-
 
 - Do not claim a route, flag, or environment variable that the bundled binary does not expose.
 - Do not bypass the wrapper and then report a broken path contract as a runtime defect.
-- Do not treat `PORT`, `ADMIN_KEY`, and `INSECT_RS_DB_PATH` as optional aliases with different names.
+- Do not treat `PORT`, `ADMIN_KEY`, and `NSECT_RS_DB_PATH` as optional aliases with different names.
 - Do not report `engine` success until the requested stdout, file output, or artifact actually exists.
 - Do not assume transcript adapters or search engines succeeded just because the command returned structured output; inspect the returned method or search metadata.
 
@@ -126,20 +126,20 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run-insect-rs.ps1 transcribe-
 2. Read [references/runtime-contract.md](references/runtime-contract.md) if the correct command surface is not obvious.
 3. Read [references/workflows.md](references/workflows.md) for task-specific execution flow.
 4. Read [references/patterns.md](references/patterns.md) when you need operational discipline or reporting rules.
-5. Run through `scripts/run-insect-rs.ps1` unless the user explicitly needs the raw binary path.
+5. Run through `scripts/run-nsect-rs.ps1` unless the user explicitly needs the raw binary path.
 6. Capture machine-checkable evidence before closing the task.
 
 ## Bundled Resources
 
-- `assets/bin/insect-rs.exe`
+- `assets/bin/nsect-rs.exe`
   Use as the bundled release artifact.
-- `scripts/run-insect-rs.ps1`
+- `scripts/run-nsect-rs.ps1`
   Use as the canonical Windows launcher.
-- `scripts/run-insect-rs.sh`
+- `scripts/run-nsect-rs.sh`
   Use from Git Bash or similar Windows-hosted Bash shells.
-- `scripts/smoke-insect-rs.ps1`
+- `scripts/smoke-nsect-rs.ps1`
   Use for a fast help-plus-engine smoke pass.
-- `scripts/save-insect-transcript.ps1`
+- `scripts/save-nsect-transcript.ps1`
   Use to capture transcript output directly to a file.
 - `references/runtime-contract.md`
   Read for the command and environment contract.
@@ -150,6 +150,6 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run-insect-rs.ps1 transcribe-
 
 ## Source of Truth
 
-- `E:\Workspaces\01_Projects\01_Github\insect-js\rust\src\main.rs`
-- `E:\Workspaces\01_Projects\01_Github\insect-js\rust\README.md`
-- `E:\Workspaces\01_Projects\01_Github\insect-js\README.md`
+- `E:\Workspaces\01_Projects\01_Github\nsect-js\rust\src\main.rs`
+- `E:\Workspaces\01_Projects\01_Github\nsect-js\rust\README.md`
+- `E:\Workspaces\01_Projects\01_Github\nsect-js\README.md`

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Insect"
-  short_description: "Alias trigger for the canonical Insect runtime"
-  default_prompt: "Use $insect to route crawling, search, transcript, or runtime tasks into the canonical Insect Rust runtime workflow."

@@ -18,7 +18,7 @@ if (-not $VideoId -and -not $Url) {
 }
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$runner = Join-Path $scriptDir "run-insect-rs.ps1"
+$runner = Join-Path $scriptDir "run-nsect-rs.ps1"
 $args = @("transcribe-youtube", "--format", $Format)
 
 if ($VideoId) {

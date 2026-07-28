@@ -2,7 +2,7 @@
 set -euo pipefail
 
 BASE_URL="http://localhost:3000"
-API_KEY="${INSECT_API_KEY:-}"
+API_KEY="${NSECT_API_KEY:-}"
 RUN_ENGINE=1
 
 usage() {

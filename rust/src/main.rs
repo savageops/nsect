@@ -2,10 +2,10 @@ use std::{fs, path::PathBuf};
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
-use insect_rs::{
+use nsect_rs::{
     AppState, build_app,
     config::Config,
-    engine::run_insect_engine,
+    engine::run_nsect_engine,
     fingerprint::{METHOD_HELP, SUPPORTED_FORMATS},
     request::{
         CookiesInput, EngineNormalizationOptions, EngineRequestInput, HeadersInput,
@@ -18,17 +18,17 @@ use insect_rs::{
 use tracing_subscriber::{EnvFilter, fmt};
 
 const ROOT_HELP: &str = "\
-Native Rust runtime for Insect
+Native Rust runtime for Nsect
 
 Usage:
-  insect-rs.exe [COMMAND]
+  nsect-rs.exe [COMMAND]
 
 Default behavior:
-  Running insect-rs.exe with no command starts the HTTP API server.
+  Running nsect-rs.exe with no command starts the HTTP API server.
 
 Commands:
   serve               Run the HTTP API server
-  engine              Run the Insect engine against a page URL or search query
+  engine              Run the Nsect engine against a page URL or search query
   transcribe-youtube  Fetch a YouTube transcript with ordered adapter fallback
   help                Print help for a command
 
@@ -37,23 +37,23 @@ Global options:
   -V, --version       Print version
 
 Examples:
-  insect-rs.exe
-  insect-rs.exe serve
-  insect-rs.exe engine --url https://example.com --format markdown --metadata
-  insect-rs.exe engine --query \"open source crawling frameworks\" --search-engines duckduckgo,bing,brave,google
-  insect-rs.exe transcribe-youtube --video-id dQw4w9WgXcQ --format json --include-segments
+  nsect-rs.exe
+  nsect-rs.exe serve
+  nsect-rs.exe engine --url https://example.com --format markdown --metadata
+  nsect-rs.exe engine --query \"open source crawling frameworks\" --search-engines duckduckgo,bing,brave,google
+  nsect-rs.exe transcribe-youtube --video-id dQw4w9WgXcQ --format json --include-segments
 
 Key environment variables:
   PORT                HTTP bind port for serve mode
   ADMIN_KEY           Admin route key for /api/keys/*
-  INSECT_RS_DB_PATH   SQLite database path for the Rust runtime
+  NSECT_RS_DB_PATH   SQLite database path for the Rust runtime
 ";
 
 const SERVE_HELP: &str = "\
 Run the HTTP API server
 
 Usage:
-  insect-rs.exe serve
+  nsect-rs.exe serve
 
 Behavior:
   Boots the local Axum server with health, key lifecycle, engine, and YouTube transcript routes.
@@ -61,17 +61,17 @@ Behavior:
 Environment variables:
   PORT                HTTP bind port for the server
   ADMIN_KEY           Admin route key for /api/keys/*
-  INSECT_RS_DB_PATH   SQLite database path for the Rust runtime
+  NSECT_RS_DB_PATH   SQLite database path for the Rust runtime
 
 Examples:
-  insect-rs.exe serve
+  nsect-rs.exe serve
 ";
 
 const ENGINE_HELP: &str = "\
-Run the Insect engine against a page URL or search query
+Run the Nsect engine against a page URL or search query
 
 Usage:
-  insect-rs.exe engine [OPTIONS]
+  nsect-rs.exe engine [OPTIONS]
 
 Modes:
   Page extraction     Use --url
@@ -112,17 +112,17 @@ Notes:
   --output writes the formatted payload to disk.
 
 Examples:
-  insect-rs.exe engine --url https://example.com --format markdown
-  insect-rs.exe engine --url https://news.ycombinator.com --method wait --selector a.storylink --format links
-  insect-rs.exe engine --query \"best rust web crawler\" --format json --search-engines duckduckgo,bing,brave,google
-  insect-rs.exe engine --url https://example.com --screenshot out/page.png --pdf out/page.pdf --output out/page.txt
+  nsect-rs.exe engine --url https://example.com --format markdown
+  nsect-rs.exe engine --url https://news.ycombinator.com --method wait --selector a.storylink --format links
+  nsect-rs.exe engine --query \"best rust web crawler\" --format json --search-engines duckduckgo,bing,brave,google
+  nsect-rs.exe engine --url https://example.com --screenshot out/page.png --pdf out/page.pdf --output out/page.txt
 ";
 
 const TRANSCRIPT_HELP: &str = "\
 Fetch a YouTube transcript with ordered adapter fallback
 
 Usage:
-  insect-rs.exe transcribe-youtube [OPTIONS]
+  nsect-rs.exe transcribe-youtube [OPTIONS]
 
 Required locator:
   --url <URL> or --video-id <VIDEO_ID>
@@ -140,7 +140,7 @@ Options:
   -h, --help                          Print this help text
 
 Methods:
-  insect_native, insect_signal, invidious, piped, yt_dlp
+  nsect_native, nsect_signal, invidious, piped, yt_dlp
 
 Notes:
   Adapters run in order until one succeeds.
@@ -148,16 +148,16 @@ Notes:
   --output writes the formatted transcript payload to disk.
 
 Examples:
-  insect-rs.exe transcribe-youtube --video-id dQw4w9WgXcQ --format text
-  insect-rs.exe transcribe-youtube --url https://www.youtube.com/watch?v=dQw4w9WgXcQ --format json --include-segments
-  insect-rs.exe transcribe-youtube --video-id dQw4w9WgXcQ --methods insect_native,insect_signal,yt_dlp
-  insect-rs.exe transcribe-youtube --video-id dQw4w9WgXcQ --format json --output out/transcript.json
+  nsect-rs.exe transcribe-youtube --video-id dQw4w9WgXcQ --format text
+  nsect-rs.exe transcribe-youtube --url https://www.youtube.com/watch?v=dQw4w9WgXcQ --format json --include-segments
+  nsect-rs.exe transcribe-youtube --video-id dQw4w9WgXcQ --methods nsect_native,nsect_signal,yt_dlp
+  nsect-rs.exe transcribe-youtube --video-id dQw4w9WgXcQ --format json --output out/transcript.json
 ";
 
 #[derive(Debug, Parser)]
-#[command(name = "insect-rs")]
+#[command(name = "nsect-rs")]
 #[command(
-    about = "Native Rust runtime for Insect",
+    about = "Native Rust runtime for Nsect",
     override_help = ROOT_HELP,
     version
 )]
@@ -175,8 +175,8 @@ enum Commands {
     )]
     Serve,
     #[command(
-        about = "Run the Insect engine against a page URL or search query",
-        long_about = "Execute the browser-backed Insect engine directly from the CLI for page extraction, search fallback, screenshots, PDFs, and saved output.",
+        about = "Run the Nsect engine against a page URL or search query",
+        long_about = "Execute the browser-backed Nsect engine directly from the CLI for page extraction, search fallback, screenshots, PDFs, and saved output.",
         override_help = ENGINE_HELP
     )]
     Engine(EngineArgs),
@@ -235,7 +235,7 @@ enum Commands {
             long = "methods",
             value_delimiter = ',',
             help = "Comma-delimited adapter order override",
-            long_help = "Override transcript adapter order. Accepted values: insect_native, insect_signal, invidious, piped, yt_dlp."
+            long_help = "Override transcript adapter order. Accepted values: nsect_native, nsect_signal, invidious, piped, yt_dlp."
         )]
         methods: Vec<String>,
         #[arg(long, help = "Write formatted transcript output to this file path")]
@@ -441,7 +441,7 @@ async fn main() -> Result<()> {
 async fn serve(state: AppState, port: u16) -> Result<()> {
     let app = build_app(state);
     let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    tracing::info!(%address, "insect-rs server listening");
+    tracing::info!(%address, "nsect-rs server listening");
     let listener = tokio::net::TcpListener::bind(address).await?;
     axum::serve(listener, app).await?;
     Ok(())
@@ -452,6 +452,8 @@ async fn run_engine_cli(args: EngineArgs) -> Result<()> {
         url: args.url,
         query: args.query,
         google: args.google,
+        // The CLI --method arg is the legacy alias; the normalizer maps it to a
+        // strategy. Leave `strategy` unset so the normalizer resolves it.
         method: Some(args.method.clone()),
         format: Some(args.format.clone()),
         verbose: Some(args.verbose),
@@ -460,7 +462,7 @@ async fn run_engine_cli(args: EngineArgs) -> Result<()> {
         scroll_count: Some(args.scroll_count),
         scroll_delay: Some(args.scroll_delay),
         delay: Some(args.delay),
-        google_count: Some(args.google_count),
+        max_results: Some(args.google_count),
         search_engines: if args.search_engines.is_empty() {
             None
         } else {
@@ -480,6 +482,7 @@ async fn run_engine_cli(args: EngineArgs) -> Result<()> {
         pdf: None,
         headless: Some(args.headless),
         no_headless: Some(args.no_headless),
+        ..EngineRequestInput::default()
     };
 
     let params = normalize_engine_request(
@@ -491,7 +494,7 @@ async fn run_engine_cli(args: EngineArgs) -> Result<()> {
     )
     .map_err(|error| anyhow::anyhow!("{}", error.message))?;
 
-    let result = run_insect_engine(params).await;
+    let result = run_nsect_engine(params).await;
     if !result.success {
         eprintln!(
             "[error] {}",
@@ -504,14 +507,19 @@ async fn run_engine_cli(args: EngineArgs) -> Result<()> {
         print_metadata(&result);
     }
 
-    let output = result.output.unwrap_or_default();
+    let output_value = result.output.unwrap_or(serde_json::Value::Null);
+    // Render: strings print directly; structured values pretty-print as JSON.
+    let output_string = match &output_value {
+        serde_json::Value::String(s) => s.clone(),
+        other => serde_json::to_string_pretty(other)?,
+    };
     if let Some(path) = args.output {
-        write_output_file(&path, &output)?;
+        write_output_file(&path, &output_string)?;
         if args.metadata {
             eprintln!("[meta] Output saved: {}", path.display());
         }
     } else {
-        println!("{output}");
+        println!("{output_string}");
     }
 
     Ok(())
@@ -525,13 +533,13 @@ fn write_output_file(path: &PathBuf, content: &str) -> Result<()> {
     Ok(())
 }
 
-fn print_metadata(result: &insect_rs::engine::EngineResponse) {
+fn print_metadata(result: &nsect_rs::engine::EngineResponse) {
     let Some(meta) = result.meta.as_ref() else {
         return;
     };
 
     match meta {
-        insect_rs::engine::EngineMeta::Page(meta) => {
+        nsect_rs::engine::EngineMeta::Page(meta) => {
             eprintln!("[meta] Method: page");
             eprintln!("[meta] Format: page");
             eprintln!("[meta] Target: {}", meta.url);
@@ -555,7 +563,7 @@ fn print_metadata(result: &insect_rs::engine::EngineResponse) {
             eprintln!("[meta] Locale: {}", meta.fingerprint.locale);
             eprintln!("[meta] Timezone: {}", meta.fingerprint.timezone);
         }
-        insect_rs::engine::EngineMeta::Search(meta) => {
+        nsect_rs::engine::EngineMeta::Search(meta) => {
             eprintln!("[meta] Method: search");
             eprintln!("[meta] Format: search");
             eprintln!("[meta] Search query: {}", meta.query);

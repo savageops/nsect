@@ -6,7 +6,7 @@ $rustRoot = Join-Path $repoRoot "rust"
 Push-Location $rustRoot
 try {
   cargo build --release
-  $artifact = Join-Path $rustRoot "target\release\insect-rs.exe"
+  $artifact = Join-Path $rustRoot "target\release\nsect-rs.exe"
   Write-Host "Built artifact: $artifact"
 } finally {
   Pop-Location

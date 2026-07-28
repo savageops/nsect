@@ -1,11 +1,11 @@
 {
-  "name": "@insect/mcp-server",
+  "name": "@nsect/mcp-server",
   "version": "1.0.0",
-  "description": "MCP server for insect API - web scraping with browser fingerprint randomization",
+  "description": "MCP server for nsect API - web scraping with browser fingerprint randomization",
   "type": "module",
   "main": "index.js",
   "bin": {
-    "insect-mcp": "./index.js"
+    "nsect-mcp": "./index.js"
   },
   "scripts": {
     "start": "node index.js"

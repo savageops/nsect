@@ -1,4 +1,0 @@
-interface:
-  display_name: "Insect RS Runtime"
-  short_description: "Canonical Insect crawl, search, and transcript runtime"
-  default_prompt: "Use $insect-rs-runtime as the canonical Insect skill to crawl, search, transcribe, validate, or serve with the bundled Rust runtime."

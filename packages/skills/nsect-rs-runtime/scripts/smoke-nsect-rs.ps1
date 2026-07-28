@@ -5,10 +5,10 @@ param(
 )
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$runner = Join-Path $scriptDir "run-insect-rs.ps1"
+$runner = Join-Path $scriptDir "run-nsect-rs.ps1"
 
 if (-not $OutputDir) {
-  $OutputDir = Join-Path $env:TEMP "insect-rs-smoke"
+  $OutputDir = Join-Path $env:TEMP "nsect-rs-smoke"
 }
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null

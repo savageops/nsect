@@ -1,13 +1,30 @@
+/**
+ * API-key lifecycle store backed by SQLite.
+ *
+ * Keys are stored ONLY as a sha-256 hash (key_hash). The plaintext `sk_…`
+ * secret is returned exactly once at creation and never persisted — a database
+ * file leak therefore cannot reveal usable credentials. Validation hashes the
+ * incoming key and looks up the hash, so the plaintext never touches the query
+ * path after creation.
+ *
+ * Clean-slate schema: the legacy keys.json migration bridge has been removed
+ * (debt per doctrine item 6 — fallbacks are temporary, not permanent). The
+ * api_keys table uses a hash primary key instead of the raw secret.
+ *
+ * All validation, rate-limit, and cooldown accounting runs inside a single
+ * BEGIN IMMEDIATE transaction so concurrent requests on the same key cannot
+ * race the counter updates.
+ */
+
 import Database from "better-sqlite3";
-import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MIN_SEARCH_COOLDOWN_SECONDS } from "../core/contracts.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DB_PATH = resolve(__dirname, "..", "..", "data", "keys.sqlite");
-const LEGACY_JSON_PATH = resolve(__dirname, "..", "..", "data", "keys.json");
 const DEFAULT_RATE_LIMIT = 100;
 const MAX_RATE_LIMIT = 10_000;
 const MAX_SEARCH_COOLDOWN_SECONDS = 3600;
@@ -16,6 +33,36 @@ const RATE_LIMIT_WINDOW_MS = 60_000;
 let _dbPath = DEFAULT_DB_PATH;
 let _db = null;
 
+/**
+ * Hash a plaintext key into its storage form (sha-256, hex). Used both at
+ * creation (to persist) and at validation (to look up). The hash is the
+ * canonical identifier — the plaintext is never stored or queried.
+ *
+ * @param {string} apiKey
+ * @returns {string}
+ */
+function hashKey(apiKey) {
+  return createHash("sha256").update(apiKey).digest("hex");
+}
+
+/**
+ * Constant-time comparison between a presented secret and the configured admin
+ * secret. Both inputs are sha-256 hashed first so the lengths align and the
+ * comparison never leaks the plaintext length or content via timing.
+ *
+ * @param {string} presented
+ * @param {string} expected
+ * @returns {boolean}
+ */
+export function safeCompareSecret(presented, expected) {
+  if (typeof presented !== "string" || typeof expected !== "string") {
+    return false;
+  }
+  const a = createHash("sha256").update(presented).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b);
+}
+
 function closeDbIfOpen() {
   if (_db) {
     _db.close();
@@ -23,31 +70,22 @@ function closeDbIfOpen() {
   }
 }
 
-function dbPathToLegacyJsonPath(dbPath) {
-  const baseDir = dirname(dbPath);
-  return resolve(baseDir, "keys.json");
-}
-
-function parseLegacyKeys() {
-  const candidates = [dbPathToLegacyJsonPath(_dbPath), LEGACY_JSON_PATH];
-  for (const candidate of candidates) {
-    if (!existsSync(candidate)) continue;
-    try {
-      const parsed = JSON.parse(readFileSync(candidate, "utf-8"));
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        return parsed;
-      }
-    } catch {
-      return null;
+function ensureSchema(db) {
+  // Clean-slate schema: key_hash is the primary key, not the raw secret.
+  // If a table with the old plaintext `api_key` column exists (pre-hashing
+  // schema), drop and recreate it — clean-slate migration per the remediation
+  // decision. Local keys are ephemeral (data/ is gitignored), so this is safe.
+  const tableInfo = db.prepare("PRAGMA table_info(api_keys)").all();
+  if (tableInfo.length > 0) {
+    const hasOldColumn = tableInfo.some((col) => col.name === "api_key");
+    if (hasOldColumn) {
+      db.exec("DROP TABLE IF EXISTS api_keys");
     }
   }
-  return null;
-}
 
-function ensureSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS api_keys (
-      api_key TEXT PRIMARY KEY,
+      key_hash TEXT PRIMARY KEY,
       label TEXT NOT NULL,
       active INTEGER NOT NULL DEFAULT 1,
       rate_limit INTEGER NOT NULL,
@@ -93,10 +131,6 @@ function normalizeSearchCooldownSeconds(value) {
   return numeric;
 }
 
-function toBooleanFlag(value) {
-  return value ? 1 : 0;
-}
-
 function getDb() {
   if (_db) return _db;
 
@@ -109,46 +143,6 @@ function getDb() {
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
   ensureSchema(db);
-
-  const keyCount = db.prepare("SELECT COUNT(*) AS count FROM api_keys").get().count;
-  if (keyCount === 0) {
-    const legacyKeys = parseLegacyKeys();
-    if (legacyKeys) {
-      const insert = db.prepare(`
-        INSERT OR IGNORE INTO api_keys (
-          api_key, label, active, rate_limit, search_cooldown_seconds,
-          use_count, created_at, last_used, expires_at, expired_at, revoked_at,
-          window_start, window_count, last_search_at, last_search_at_iso
-        ) VALUES (
-          @api_key, @label, @active, @rate_limit, @search_cooldown_seconds,
-          @use_count, @created_at, @last_used, @expires_at, @expired_at, @revoked_at,
-          @window_start, @window_count, @last_search_at, @last_search_at_iso
-        )
-      `);
-      const migrate = db.transaction((entries) => {
-        for (const [apiKey, value] of entries) {
-          insert.run({
-            api_key: apiKey,
-            label: String(value?.label ?? "unnamed"),
-            active: toBooleanFlag(value?.active !== false),
-            rate_limit: normalizeRateLimit(value?.rateLimit),
-            search_cooldown_seconds: normalizeSearchCooldownSeconds(value?.searchCooldownSeconds),
-            use_count: Number.isInteger(value?.useCount) ? value.useCount : 0,
-            created_at: value?.createdAt || new Date().toISOString(),
-            last_used: value?.lastUsed || null,
-            expires_at: Number.isInteger(value?.expiresAt) ? value.expiresAt : null,
-            expired_at: value?.expiredAt || null,
-            revoked_at: value?.revokedAt || null,
-            window_start: Number.isInteger(value?.windowStart) ? value.windowStart : null,
-            window_count: Number.isInteger(value?.windowCount) ? value.windowCount : 0,
-            last_search_at: Number.isInteger(value?.lastSearchAt) ? value.lastSearchAt : null,
-            last_search_at_iso: value?.lastSearchAtIso || null,
-          });
-        }
-      });
-      migrate(Object.entries(legacyKeys));
-    }
-  }
 
   _db = db;
   return _db;
@@ -171,14 +165,22 @@ function withImmediateTransaction(fn) {
   }
 }
 
-function maskKey(apiKey) {
-  return `${apiKey.substring(0, 12)}...`;
+/**
+ * Public-facing key identifier: a short prefix of the hash. The plaintext
+ * secret is never exposed here — only enough of the hash to let an operator
+ * distinguish keys in a list without revealing usable credential material.
+ *
+ * @param {string} keyHash
+ * @returns {string}
+ */
+function maskKeyHash(keyHash) {
+  return `${keyHash.substring(0, 12)}…`;
 }
 
-function mapRowToPublic(row, { mask = true } = {}) {
+function mapRowToPublic(row) {
   if (!row) return null;
   return {
-    apiKey: mask ? maskKey(row.api_key) : row.api_key,
+    keyHash: maskKeyHash(row.key_hash),
     label: row.label,
     active: row.active === 1,
     rateLimit: row.rate_limit,
@@ -206,11 +208,21 @@ export function resetDbPath() {
   _dbPath = DEFAULT_DB_PATH;
 }
 
+/**
+ * Validate a presented plaintext API key. The key is hashed and looked up by
+ * hash; the plaintext is never queried against the table. Enforces expiry,
+ * search cooldown, and a rolling rate-limit window, all inside one transaction.
+ *
+ * @param {string} apiKey  Plaintext key as presented by the caller.
+ * @param {{ enforceSearchCooldown?: boolean }} [options]
+ * @returns {{ valid: true } | { valid: false, reason: string, retryAfter?: number, cooldownSeconds?: number }}
+ */
 export function validateKey(apiKey, { enforceSearchCooldown = false } = {}) {
   if (!apiKey) return { valid: false, reason: "missing" };
+  const keyHash = hashKey(apiKey);
 
   return withImmediateTransaction((db) => {
-    const selectStmt = db.prepare("SELECT * FROM api_keys WHERE api_key = ?");
+    const selectStmt = db.prepare("SELECT * FROM api_keys WHERE key_hash = ?");
     const updateStmt = db.prepare(`
       UPDATE api_keys
       SET
@@ -225,10 +237,10 @@ export function validateKey(apiKey, { enforceSearchCooldown = false } = {}) {
         window_count = @window_count,
         last_search_at = @last_search_at,
         last_search_at_iso = @last_search_at_iso
-      WHERE api_key = @api_key
+      WHERE key_hash = @key_hash
     `);
 
-    const row = selectStmt.get(apiKey);
+    const row = selectStmt.get(keyHash);
     if (!row) return { valid: false, reason: "not_found" };
     if (row.active !== 1) return { valid: false, reason: "revoked" };
 
@@ -251,7 +263,7 @@ export function validateKey(apiKey, { enforceSearchCooldown = false } = {}) {
       active = 0;
       expiredAt = nowIso;
       updateStmt.run({
-        api_key: apiKey,
+        key_hash: keyHash,
         active,
         rate_limit: normalizedRateLimit,
         search_cooldown_seconds: normalizedCooldown,
@@ -271,20 +283,6 @@ export function validateKey(apiKey, { enforceSearchCooldown = false } = {}) {
       const cooldownMs = normalizedCooldown * 1000;
       const elapsedSinceLastSearch = now - lastSearchAt;
       if (elapsedSinceLastSearch < cooldownMs) {
-        updateStmt.run({
-          api_key: apiKey,
-          active,
-          rate_limit: normalizedRateLimit,
-          search_cooldown_seconds: normalizedCooldown,
-          use_count: useCount,
-          last_used: lastUsed,
-          expires_at: expiresAt,
-          expired_at: expiredAt,
-          window_start: windowStart,
-          window_count: windowCount,
-          last_search_at: lastSearchAt,
-          last_search_at_iso: lastSearchAtIso,
-        });
         return {
           valid: false,
           reason: "cooldown",
@@ -301,20 +299,6 @@ export function validateKey(apiKey, { enforceSearchCooldown = false } = {}) {
 
     windowCount += 1;
     if (windowCount > normalizedRateLimit) {
-      updateStmt.run({
-        api_key: apiKey,
-        active,
-        rate_limit: normalizedRateLimit,
-        search_cooldown_seconds: normalizedCooldown,
-        use_count: useCount,
-        last_used: lastUsed,
-        expires_at: expiresAt,
-        expired_at: expiredAt,
-        window_start: windowStart,
-        window_count: windowCount,
-        last_search_at: lastSearchAt,
-        last_search_at_iso: lastSearchAtIso,
-      });
       return {
         valid: false,
         reason: "rate_limited",
@@ -330,7 +314,7 @@ export function validateKey(apiKey, { enforceSearchCooldown = false } = {}) {
     }
 
     updateStmt.run({
-      api_key: apiKey,
+      key_hash: keyHash,
       active,
       rate_limit: normalizedRateLimit,
       search_cooldown_seconds: normalizedCooldown,
@@ -348,6 +332,17 @@ export function validateKey(apiKey, { enforceSearchCooldown = false } = {}) {
   });
 }
 
+/**
+ * Create a new API key. Generates a high-entropy plaintext secret, persists
+ * only its hash, and returns the plaintext exactly once. The caller must
+ * surface it to the operator immediately — it is unrecoverable afterwards.
+ *
+ * @param {string} [label]
+ * @param {number} [rateLimit]
+ * @param {number|null} [expiresInSeconds]
+ * @param {number} [searchCooldownSeconds]
+ * @returns {{ apiKey: string, keyHash: string, label: string, active: boolean, rateLimit: number, searchCooldownSeconds: number, useCount: number, createdAt: string, lastUsed: null, expiresAt: number|null, expiredAt: null, revokedAt: null, windowStart: null, windowCount: number, lastSearchAt: null, lastSearchAtIso: null }}
+ */
 export function createKey(
   label = "unnamed",
   rateLimit = DEFAULT_RATE_LIMIT,
@@ -355,6 +350,7 @@ export function createKey(
   searchCooldownSeconds = MIN_SEARCH_COOLDOWN_SECONDS,
 ) {
   const apiKey = `sk_${randomUUID().replace(/-/g, "")}`;
+  const keyHash = hashKey(apiKey);
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
   const normalizedRateLimit = normalizeRateLimit(rateLimit);
@@ -364,18 +360,18 @@ export function createKey(
   withImmediateTransaction((db) => {
     const insert = db.prepare(`
       INSERT INTO api_keys (
-        api_key, label, active, rate_limit, search_cooldown_seconds,
+        key_hash, label, active, rate_limit, search_cooldown_seconds,
         use_count, created_at, last_used, expires_at, expired_at, revoked_at,
         window_start, window_count, last_search_at, last_search_at_iso
       ) VALUES (
-        @api_key, @label, 1, @rate_limit, @search_cooldown_seconds,
+        @key_hash, @label, 1, @rate_limit, @search_cooldown_seconds,
         0, @created_at, NULL, @expires_at, NULL, NULL,
         NULL, 0, NULL, NULL
       )
     `);
 
     insert.run({
-      api_key: apiKey,
+      key_hash: keyHash,
       label: String(label),
       rate_limit: normalizedRateLimit,
       search_cooldown_seconds: normalizedCooldown,
@@ -386,6 +382,7 @@ export function createKey(
 
   return {
     apiKey,
+    keyHash: maskKeyHash(keyHash),
     label: String(label),
     active: true,
     rateLimit: normalizedRateLimit,
@@ -405,11 +402,12 @@ export function createKey(
 
 export function revokeKey(apiKey) {
   if (!apiKey) return false;
+  const keyHash = hashKey(apiKey);
   return withImmediateTransaction((db) => {
-    const row = db.prepare("SELECT api_key FROM api_keys WHERE api_key = ?").get(apiKey);
+    const row = db.prepare("SELECT key_hash FROM api_keys WHERE key_hash = ?").get(keyHash);
     if (!row) return false;
-    db.prepare("UPDATE api_keys SET active = 0, revoked_at = ? WHERE api_key = ?")
-      .run(new Date().toISOString(), apiKey);
+    db.prepare("UPDATE api_keys SET active = 0, revoked_at = ? WHERE key_hash = ?")
+      .run(new Date().toISOString(), keyHash);
     return true;
   });
 }
@@ -418,11 +416,18 @@ export function listKeys() {
   const rows = getDb()
     .prepare("SELECT * FROM api_keys ORDER BY created_at DESC")
     .all();
-  return rows.map((row) => mapRowToPublic(row, { mask: true }));
+  return rows.map((row) => mapRowToPublic(row));
 }
 
+/**
+ * Look up a key by its plaintext (hashed internally). Used by admin
+ * inspect-by-key routes. Returns the masked public projection.
+ *
+ * @param {string} apiKey
+ */
 export function getKeyInfo(apiKey) {
   if (!apiKey) return null;
-  const row = getDb().prepare("SELECT * FROM api_keys WHERE api_key = ?").get(apiKey);
-  return mapRowToPublic(row, { mask: true });
+  const keyHash = hashKey(apiKey);
+  const row = getDb().prepare("SELECT * FROM api_keys WHERE key_hash = ?").get(keyHash);
+  return mapRowToPublic(row);
 }

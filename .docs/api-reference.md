@@ -1,15 +1,15 @@
-# Insect API Reference
+# Nsect API Reference
 
 ## Environment
 
 - `PORT` (default `3000`)
 - `ADMIN_KEY` (required in production; dev default `admin_change_me`)
-- `INSECT_RS_DB_PATH` (Rust runtime only; default `data/keys.sqlite` relative to `rust/`)
-- `INSECT_API_URL` (MCP client target, default `http://localhost:3000`)
-- `INSECT_API_KEY` (required by MCP server)
-- `INSECT_INVIDIOUS_INSTANCES` (optional CSV override for transcript fallback)
-- `INSECT_PIPED_INSTANCES` (optional CSV override for transcript fallback)
-- `INSECT_YTDLP_COMMANDS` (optional CSV command list fallback for `yt_dlp`)
+- `NSECT_RS_DB_PATH` (Rust runtime only; default `data/keys.sqlite` relative to `rust/`)
+- `NSECT_API_URL` (MCP client target, default `http://localhost:3000`)
+- `NSECT_API_KEY` (required by MCP server)
+- `NSECT_INVIDIOUS_INSTANCES` (optional CSV override for transcript fallback)
+- `NSECT_PIPED_INSTANCES` (optional CSV override for transcript fallback)
+- `NSECT_YTDLP_COMMANDS` (optional CSV command list fallback for `yt_dlp`)
 - Key state is persisted in SQLite WAL at `data/keys.sqlite`
 
 ## Authentication
@@ -37,7 +37,7 @@ Returns service health and runtime info.
 
 ### `POST /api/engine`
 
-Run the Insect engine against a URL or execute multi-engine search.
+Run the Nsect engine against a URL or execute multi-engine search.
 
 Supported fields:
 
@@ -77,15 +77,15 @@ Supported fields:
 - `videoId` string (required unless `url`)
 - `language` string (default `en`)
 - `format` one of `text|json|markdown`
-- `methods` string array or CSV list (`insect_native|insect_signal|invidious|piped|yt_dlp`)
+- `methods` string array or CSV list (`nsect_native|nsect_signal|invidious|piped|yt_dlp`)
 - `includeSegments` boolean (default `false`)
 - `includeAutoCaptions` boolean (default `true`)
 - `timeout` integer `5..120`
 
 Method behavior:
 
-- `insect_native`: direct watch-page caption extraction path
-- `insect_signal`: direct InnerTube player extraction path
+- `nsect_native`: direct watch-page caption extraction path
+- `nsect_signal`: direct InnerTube player extraction path
 - `invidious`: Invidious API fallback
 - `piped`: Piped API fallback
 - `yt_dlp`: `yt-dlp` command fallback

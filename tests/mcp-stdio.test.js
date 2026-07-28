@@ -38,27 +38,36 @@ function waitForStderr(child, pattern, timeoutMs = 5000) {
 }
 
 describe("MCP stdio server", () => {
-  it("fails fast when INSECT_API_KEY is missing", async () => {
+  it("starts in keyless (local) mode when NSECT_API_KEY is missing", async () => {
+    // Local mode contract: a missing key is not fatal. The server warns to
+    // stderr and continues running so it can talk to a keyless local server.
     const child = spawn(process.execPath, [MCP_ENTRY], {
       cwd: process.cwd(),
       env: {
         ...process.env,
-        INSECT_API_KEY: "",
+        NSECT_API_KEY: "",
       },
+      stdio: ["pipe", "pipe", "pipe"],
     });
 
-    const result = await collectUntilClose(child);
-    expect(result.code).toBe(1);
-    expect(result.stderr).toMatch(/INSECT_API_KEY/);
-  }, 10000);
+    const closePromise = collectUntilClose(child);
+    await waitForStderr(child, /keyless/i, 10000);
+    // Must still reach the running banner (did not exit).
+    await waitForStderr(child, /running on stdio/i, 10000);
+    child.kill();
+
+    const result = await closePromise;
+    expect(result.stderr).toMatch(/keyless/i);
+    expect(result.stderr).toMatch(/running on stdio/i);
+  }, 15000);
 
   it("starts successfully when required env vars are set", async () => {
     const child = spawn(process.execPath, [MCP_ENTRY], {
       cwd: process.cwd(),
       env: {
         ...process.env,
-        INSECT_API_KEY: "sk_test",
-        INSECT_API_URL: "http://127.0.0.1:3000",
+        NSECT_API_KEY: "sk_test",
+        NSECT_API_URL: "http://127.0.0.1:3000",
       },
       stdio: ["pipe", "pipe", "pipe"],
     });

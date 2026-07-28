@@ -26,6 +26,16 @@ export function htmlToMarkdown(html) {
   return md;
 }
 
+/**
+ * Format page content for output. The unified envelope contract:
+ *   - text/html/markdown → returns a string.
+ *   - json → returns a parsed object (NOT a stringified JSON string).
+ *   - links → returns a parsed array of {href, text} (NOT a joined string).
+ *
+ * The CLI layer stringifies structured outputs for stdout; the HTTP API
+ * serializes them naturally in the JSON response. Callers reading the envelope
+ * check `result.format` to know whether `output` is a string or structured.
+ */
 export function formatOutput(data, format) {
   switch (format) {
     case "text":
@@ -33,28 +43,42 @@ export function formatOutput(data, format) {
     case "html":
       return data.html;
     case "markdown":
-      return htmlToMarkdown(data.html);
+      // Prefer defuddle's pre-rendered markdown (DOM-scored, boilerplate-stripped)
+      // over the regex converter. Fall back to regex only if defuddle returned none.
+      return data.markdown || htmlToMarkdown(data.html);
     case "links":
-      return data.links
-        .map((l) => `${l.href}  ${l.text ? "| " + l.text : ""}`)
-        .join("\n");
+      // Structured: parsed array, not a joined string.
+      return data.links;
     case "json":
-      return JSON.stringify(
-        { title: data.title, url: data.url, text: data.text, links: data.links, meta: data.meta },
-        null,
-        2,
-      );
+      // Structured: parsed object, not a stringified JSON string. Includes the
+      // schema.org structured data and bibliographic fields when available.
+      return {
+        title: data.title,
+        url: data.url,
+        text: data.text,
+        markdown: data.markdown,
+        links: data.links,
+        meta: data.meta,
+        ...(data.author ? { author: data.author } : {}),
+        ...(data.published ? { published: data.published } : {}),
+        ...(data.schemaOrg?.length ? { schemaOrg: data.schemaOrg } : {}),
+      };
     default:
       return data.text;
   }
 }
 
+/**
+ * Format search results. Mirrors the envelope contract: `json` returns the
+ * parsed array (not stringified), `links` returns a parsed array of URL
+ * strings, text/markdown return prose strings.
+ */
 export function formatGoogleResults(results, format) {
   switch (format) {
     case "json":
-      return JSON.stringify(results, null, 2);
+      return results;
     case "links":
-      return results.map((r) => r.url).join("\n");
+      return results.map((r) => r.url);
     case "text":
       return results
         .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
@@ -64,6 +88,6 @@ export function formatGoogleResults(results, format) {
         .map((r, i) => `${i + 1}. [${r.title}](${r.url})\n   > ${r.snippet}`)
         .join("\n\n");
     default:
-      return JSON.stringify(results, null, 2);
+      return results;
   }
 }

@@ -1,6 +1,6 @@
-# insect-rs
+# nsect-rs
 
-Native Rust runtime for Insect.
+Native Rust runtime for Nsect.
 
 ## Scope
 
@@ -37,7 +37,7 @@ bash scripts/build-rust.sh
 
 Release artifact:
 
-- `rust/target/release/insect-rs.exe` on Windows
+- `rust/target/release/nsect-rs.exe` on Windows
 
 ## Run
 
@@ -61,15 +61,15 @@ Runtime env:
 
 - `PORT` for the HTTP listener
 - `ADMIN_KEY` for admin route protection
-- `INSECT_RS_DB_PATH` to override the Rust SQLite file path
+- `NSECT_RS_DB_PATH` to override the Rust SQLite file path
 
 Packaged Codex skill:
 
-- `packages/skills/insect-rs-runtime`
-- `packages/skills/insect`
-- `packages/skills/insect-rs-runtime/scripts/run-insect-rs.ps1`
-- `packages/skills/insect-rs-runtime/scripts/save-insect-transcript.ps1`
-- `packages/skills/insect-rs-runtime/assets/bin/insect-rs.exe`
+- `packages/skills/nsect-rs-runtime`
+- `packages/skills/nsect`
+- `packages/skills/nsect-rs-runtime/scripts/run-nsect-rs.ps1`
+- `packages/skills/nsect-rs-runtime/scripts/save-nsect-transcript.ps1`
+- `packages/skills/nsect-rs-runtime/assets/bin/nsect-rs.exe`
 
 Cross-runtime repo scripts:
 
@@ -127,6 +127,6 @@ curl -sS http://127.0.0.1:3000/api/youtube/transcript \
   -d '{
     "videoId":"dQw4w9WgXcQ",
     "format":"json",
-    "methods":["insect_native","insect_signal","invidious","piped","yt_dlp"]
+    "methods":["nsect_native","nsect_signal","invidious","piped","yt_dlp"]
   }'
 ```
