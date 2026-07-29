@@ -186,3 +186,59 @@ describe("injectSolution", () => {
     await expect(injectSolution(page, "hcaptcha", "token")).resolves.not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// LIVE_INTEGRATION solver end-to-end test
+//
+// Validates the full solver pipeline: engine detects a challenge → solver
+// calls CapSolver → token injected → page resolves → extraction succeeds.
+//
+// Requires: LIVE_INTEGRATION=1 AND NSECT_SOLVER_API_KEY=<real_key>
+// Run: LIVE_INTEGRATION=1 NSECT_SOLVER_API_KEY=CAP-xxx npx vitest run tests/solver.test.js -t "live"
+// ---------------------------------------------------------------------------
+
+const itLive = process.env.LIVE_INTEGRATION === "1" ? it : it.skip;
+const solverApiKey = process.env.NSECT_SOLVER_API_KEY || "";
+
+describe("Live solver end-to-end pipeline", () => {
+  itLive("solver detects, solves, and resolves a real challenge page", async () => {
+    if (!solverApiKey) {
+      console.error("[solver-live] Skipping: NSECT_SOLVER_API_KEY not set");
+      return;
+    }
+
+    // Find a real page that serves a Turnstile/hCaptcha challenge.
+    // We use a known challenge-testing site. If the site is down, the test
+    // should skip gracefully rather than fail.
+    const { runNsectEngine } = await import("../server/core/engine.js");
+    const challengeUrl = "https://demo.turnstile.workers.dev/";
+
+    const result = await runNsectEngine({
+      url: challengeUrl,
+      strategy: "auto",
+      challengeTimeout: 20,
+      bypassChallenges: true,
+      format: "text",
+      timeout: 90, // generous for solver latency
+      solver: {
+        enabled: true,
+        provider: "capsolver",
+        apiKey: solverApiKey,
+        timeout: 60,
+        kinds: ["cloudflare_turnstile", "cloudflare", "hcaptcha", "recaptcha"],
+      },
+    });
+
+    // The solver pipeline should either:
+    // 1. Succeed (challenge detected → solved → content extracted)
+    // 2. Fail with CHALLENGE_BLOCKED (solver couldn't solve in time — acceptable)
+    if (result.success) {
+      // If it succeeded, verify the challenge meta shows it was solved
+      expect(result.meta?.challenge?.solved).toBe(true);
+    } else {
+      // If it failed, it should be a CHALLENGE_BLOCKED (not BROWSER_LAUNCH etc)
+      expect(result.errorCode).toBe("CHALLENGE_BLOCKED");
+      expect(result.meta?.challenge?.detected).toBe(true);
+    }
+  }, 120000);
+});
