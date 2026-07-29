@@ -1,5 +1,6 @@
 /**
  * Performance benchmark: regex-based htmlToMarkdown vs turndown on large pages.
+ * Also benchmarks defuddle extraction vs raw innerText for extraction tier.
  *
  * This benchmark generates realistic large HTML fixtures (small, medium, large)
  * and compares the two converters. It's a vitest test (runs in the suite) but
@@ -45,8 +46,29 @@ function bench(fn, iterations = 5) {
   const times = [];
   for (let i = 0; i < iterations; i++) {
     const start = process.hrtime.bigint();
-    fn();
-    const elapsed = Number(process.hrtime.bigint() - start) / 1_000_000; // ms
+    const result = fn();
+    // Support both sync and async functions
+    if (result && typeof result.then === "function") {
+      // Async — can't measure synchronously; use a sync wrapper
+      // This is a best-effort measurement for async fns
+      const elapsed = Number(process.hrtime.bigint() - start) / 1_000_000;
+      times.push(elapsed);
+    } else {
+      const elapsed = Number(process.hrtime.bigint() - start) / 1_000_000;
+      times.push(elapsed);
+    }
+  }
+  const avg = times.reduce((a, b) => a + b, 0) / times.length;
+  const min = Math.min(...times);
+  return { avg, min, iterations };
+}
+
+async function benchAsync(fn, iterations = 5) {
+  const times = [];
+  for (let i = 0; i < iterations; i++) {
+    const start = process.hrtime.bigint();
+    await fn();
+    const elapsed = Number(process.hrtime.bigint() - start) / 1_000_000;
     times.push(elapsed);
   }
   const avg = times.reduce((a, b) => a + b, 0) / times.length;
@@ -123,4 +145,66 @@ describe("Markdown converter performance benchmark", () => {
     expect(turndownMd.toLowerCase()).toContain("bold");
     expect(turndownMd.toLowerCase()).toContain("italic");
   });
+});
+
+// ---------------------------------------------------------------------------
+// Benchmark: defuddle extraction tier vs raw innerText (DOM parsing overhead)
+// ---------------------------------------------------------------------------
+
+describe("Defuddle extraction vs raw innerText", () => {
+  const sizes = [
+    { name: "small (50 paragraphs)", paragraphs: 50 },
+    { name: "medium (500 paragraphs)", paragraphs: 500 },
+    { name: "large (2000 paragraphs)", paragraphs: 2000 },
+  ];
+
+  for (const { name, paragraphs } of sizes) {
+    it(`defuddle vs raw extraction on ${name}`, async () => {
+      const html = generateArticleHtml(paragraphs);
+      const htmlSize = (html.length / 1024).toFixed(1);
+
+      // "Raw innerText" simulation: strip tags with a simple regex (the cheapest
+      // possible extraction — what the old engine did before defuddle).
+      const rawInnerText = (h) => h
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      // Warm up
+      rawInnerText(html);
+      const { Defuddle } = await import("defuddle/node");
+      Defuddle(html, "https://example.com/article", { content: "markdown" });
+
+      // Benchmark raw extraction
+      const rawResult = bench(() => rawInnerText(html));
+
+      // Benchmark defuddle (includes linkedom DOM parse + scoring + markdown).
+      // Must await — Defuddle is async (returns a thenable).
+      const defuddleResult = await benchAsync(async () =>
+        await Defuddle(html, "https://example.com/article", { content: "markdown" }),
+      );
+
+      const overhead = (defuddleResult.avg - rawResult.avg).toFixed(2);
+      const ratio = (defuddleResult.avg / rawResult.avg).toFixed(2);
+
+      console.error(
+        `[bench-extract] ${name} (${htmlSize}KB HTML):\n` +
+        `  raw innerText:  avg=${rawResult.avg.toFixed(2)}ms min=${rawResult.min.toFixed(2)}ms\n` +
+        `  defuddle:       avg=${defuddleResult.avg.toFixed(2)}ms min=${defuddleResult.min.toFixed(2)}ms\n` +
+        `  overhead:       +${overhead}ms (${ratio}x)\n`,
+      );
+
+      // Both should produce content
+      const rawText = rawInnerText(html);
+      const defuddleResult2 = await Defuddle(html, "https://example.com/article", { content: "markdown" });
+      expect(rawText.length).toBeGreaterThan(0);
+      expect(defuddleResult2.wordCount).toBeGreaterThan(0);
+
+      // Defuddle should complete within reasonable time even on large pages.
+      // The DOM-scoring overhead should be negligible vs browser render time.
+      expect(defuddleResult.avg).toBeLessThan(500);
+    }, 30000);
+  }
 });
