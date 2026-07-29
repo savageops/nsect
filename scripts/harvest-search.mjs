@@ -16,7 +16,7 @@ function sleep(ms) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }
 
-function slugify(value, index) {
+export function slugify(value, index) {
   const slug = String(value)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -51,20 +51,25 @@ function releaseLock(lockPath) {
   }
 }
 
-function collectQueries(options, repoRoot) {
+export function collectQueries(options, repoRoot) {
   const queries = [];
   if (options.query) {
     const list = Array.isArray(options.query) ? options.query : [options.query];
     queries.push(...list.map((value) => value.trim()).filter(Boolean));
   }
   if (options["query-file"]) {
-    const content = readFileSync(resolve(repoRoot, options["query-file"]), "utf-8");
-    queries.push(
-      ...content
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line && !line.startsWith("#")),
-    );
+    const filePath = resolve(repoRoot, options["query-file"]);
+    try {
+      const content = readFileSync(filePath, "utf-8");
+      queries.push(
+        ...content
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line && !line.startsWith("#")),
+      );
+    } catch (err) {
+      throw new Error(`--query-file not found or unreadable: ${filePath} (${err.message})`);
+    }
   }
   return queries;
 }
@@ -173,6 +178,13 @@ export async function main() {
   if (!options["output-dir"]) {
     throw new Error("--output-dir is required");
   }
+  // Validate numeric options to prevent NaN propagation.
+  if (options.timeout && !Number.isFinite(Number(options.timeout))) {
+    throw new Error(`--timeout must be a number, got: ${options.timeout}`);
+  }
+  if (options["delay-ms"] && !Number.isFinite(Number(options["delay-ms"]))) {
+    throw new Error(`--delay-ms must be a number, got: ${options["delay-ms"]}`);
+  }
 
   const outputDir = resolve(repoRoot, options["output-dir"]);
   ensureDir(outputDir);
@@ -201,8 +213,11 @@ export async function main() {
         ? runRustQuery(repoRoot, options, query, outputPath)
         : runJsQuery(repoRoot, options, query, outputPath);
 
+      if (result.error) {
+        throw new Error(`Spawn failed for '${query}': ${result.error.message}`);
+      }
       if (result.status !== 0) {
-        throw new Error(`Harvest query failed for '${query}'`);
+        throw new Error(`Harvest query failed (exit ${result.status}, signal ${result.signal || "none"}) for '${query}'`);
       }
 
       manifest.queries.push({
@@ -216,14 +231,16 @@ export async function main() {
     }
   } finally {
     releaseLock(lockPath);
+    // Always write the manifest — even on partial failure — so the caller
+    // can inspect which queries succeeded before the failure point.
+    const manifestPath = resolve(outputDir, "manifest.json");
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf-8");
+    console.log(`Harvest manifest saved: ${manifestPath} (${manifest.queries.length}/${queries.length} queries)`);
   }
-
-  const manifestPath = resolve(outputDir, "manifest.json");
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf-8");
-  console.log(`Harvest manifest saved: ${manifestPath}`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Resolve argv[1] to absolute before pathToFileURL — relative paths can throw.
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   main().catch((error) => {
     console.error("[error]", error.message);
     process.exit(1);

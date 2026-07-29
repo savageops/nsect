@@ -83,8 +83,11 @@ function runRustTranscript(repoRoot, options, outputPath) {
     cwd: repoRoot,
     stdio: "inherit",
   });
+  if (result.error) {
+    throw new Error(`Rust transcript spawn failed: ${result.error.message}`);
+  }
   if (result.status !== 0) {
-    process.exit(result.status || 1);
+    throw new Error(`Rust transcript failed (exit ${result.status})`);
   }
   return outputPath;
 }
@@ -157,7 +160,7 @@ export async function main() {
   console.log(`Transcript saved: ${savedPath}`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   main().catch((error) => {
     console.error("[error]", error.message);
     process.exit(1);

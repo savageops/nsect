@@ -20,15 +20,18 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --api-url)
-      API_URL="${2:-}"
+      [[ $# -ge 2 ]] || { echo "Error: $1 requires an argument" >&2; exit 1; }
+      API_URL="$2"
       shift 2
       ;;
     --api-key)
-      API_KEY="${2:-}"
+      [[ $# -ge 2 ]] || { echo "Error: $1 requires an argument" >&2; exit 1; }
+      API_KEY="$2"
       shift 2
       ;;
     --entry-path)
-      ENTRY_PATH="${2:-}"
+      [[ $# -ge 2 ]] || { echo "Error: $1 requires an argument" >&2; exit 1; }
+      ENTRY_PATH="$2"
       shift 2
       ;;
     -h|--help)
