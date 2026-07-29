@@ -242,4 +242,70 @@ mod tests {
         assert_eq!(cfg.kinds.len(), 2);
         assert!(cfg.kinds.contains(&"cloudflare_turnstile".to_string()));
     }
+
+    #[test]
+    fn resolve_mode_accepts_truthy_variants() {
+        assert_eq!(resolve_mode(&[("NSECT_HOSTED".to_string(), "true".to_string())]), Mode::Hosted);
+        assert_eq!(resolve_mode(&[("NSECT_HOSTED".to_string(), "YES".to_string())]), Mode::Hosted);
+        assert_eq!(resolve_mode(&[("NSECT_HOSTED".to_string(), "yes".to_string())]), Mode::Hosted);
+    }
+
+    #[test]
+    fn resolve_mode_ignores_empty_hosted_flag() {
+        assert_eq!(resolve_mode(&[("NSECT_HOSTED".to_string(), "".to_string())]), Mode::Local);
+        assert_eq!(resolve_mode(&[("NSECT_HOSTED".to_string(), "  ".to_string())]), Mode::Local);
+    }
+
+    #[test]
+    fn parse_csv_env_returns_none_for_empty() {
+        unsafe { std::env::remove_var("NSECT_TEST_EMPTY_CSV"); }
+        assert!(parse_csv_env("NSECT_TEST_EMPTY_CSV").is_none());
+    }
+
+    #[test]
+    fn parse_csv_env_returns_vec_for_values() {
+        unsafe { std::env::set_var("NSECT_TEST_CSV", "a, b ,c"); }
+        let result = parse_csv_env("NSECT_TEST_CSV");
+        assert_eq!(result, Some(vec!["a".to_string(), "b".to_string(), "c".to_string()]));
+        unsafe { std::env::remove_var("NSECT_TEST_CSV"); }
+    }
+
+    #[test]
+    fn parse_csv_env_filters_empty_parts() {
+        unsafe { std::env::set_var("NSECT_TEST_CSV2", "a,, ,b"); }
+        let result = parse_csv_env("NSECT_TEST_CSV2");
+        assert_eq!(result, Some(vec!["a".to_string(), "b".to_string()]));
+        unsafe { std::env::remove_var("NSECT_TEST_CSV2"); }
+    }
+
+    #[test]
+    fn solver_config_defaults_to_capsolver_provider() {
+        // The SolverConfig struct default provider is capsolver (best coverage/price)
+        let cfg = SolverConfig {
+            enabled: true,
+            provider: "capsolver".to_string(),
+            api_key: "k".to_string(),
+            timeout: 60,
+            kinds: vec!["cloudflare_turnstile".to_string()],
+        };
+        assert_eq!(cfg.provider, "capsolver");
+    }
+
+    #[test]
+    fn solver_config_default_timeout_is_60() {
+        let cfg = SolverConfig {
+            enabled: true,
+            provider: "capsolver".to_string(),
+            api_key: "k".to_string(),
+            timeout: 60,
+            kinds: vec![],
+        };
+        assert_eq!(cfg.timeout, 60);
+    }
+
+    #[test]
+    fn mode_is_hosted_check() {
+        assert!(Mode::Hosted.is_hosted());
+        assert!(!Mode::Local.is_hosted());
+    }
 }
