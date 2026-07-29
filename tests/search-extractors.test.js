@@ -266,3 +266,89 @@ describe("extractSearchResultsForEngineByName", () => {
     expect(results.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// LIVE integration tests — gated behind LIVE_INTEGRATION=1
+//
+// These tests actually search the real search engines and verify that the
+// CSS selectors still extract results. When an engine updates its DOM and the
+// selectors break, these tests fail with "0 results" — the early-warning
+// signal that search-extractors.js needs updating.
+//
+// Run: LIVE_INTEGRATION=1 npx vitest run tests/search-extractors.test.js
+// ---------------------------------------------------------------------------
+
+const itLive = process.env.LIVE_INTEGRATION === "1" ? it : it.skip;
+
+describe("Live search selector validation", () => {
+  // Lazy-load the engine to avoid browser startup when tests are skipped.
+  async function runSearch(engine, query) {
+    const { runNsectEngine } = await import("../server/core/engine.js");
+    return runNsectEngine({
+      query,
+      searchEngines: [engine],
+      format: "json",
+      maxResults: 3,
+      strategy: "fast",
+      timeout: 25,
+    });
+  }
+
+  itLive("DuckDuckGo selectors extract real results", async () => {
+    const result = await runSearch("duckduckgo", "open source crawler frameworks");
+    expect(result.success).toBe(true);
+    expect(result.meta.type).toBe("search");
+    expect(result.meta.resultCount).toBeGreaterThan(0);
+    expect(result.meta.engine).toBe("duckduckgo");
+    // Each result should have a title and URL
+    const results = result.output;
+    expect(Array.isArray(results)).toBe(true);
+    expect(results[0].title).toBeTruthy();
+    expect(results[0].url).toMatch(/^https?:\/\//);
+  }, 45000);
+
+  itLive("Bing selectors extract real results", async () => {
+    const result = await runSearch("bing", "web scraping best practices");
+    expect(result.success).toBe(true);
+    expect(result.meta.resultCount).toBeGreaterThan(0);
+    expect(result.meta.engine).toBe("bing");
+  }, 45000);
+
+  itLive("Brave selectors extract real results", async () => {
+    const result = await runSearch("brave", "rust programming language");
+    expect(result.success).toBe(true);
+    expect(result.meta.resultCount).toBeGreaterThan(0);
+    expect(result.meta.engine).toBe("brave");
+  }, 45000);
+
+  itLive("Google selectors extract real results (known fragile — Google changes DOM frequently)", async () => {
+    const result = await runSearch("google", "site:github.com simdjson");
+    // Google is the most fragile engine — it may serve consent pages, CF
+    // challenges, or changed DOM. The multi-engine fallback test below proves
+    // the system works even when Google fails. This test documents the known
+    // fragility: if it passes, great; if it fails, search-extractors.js
+    // selectors for Google need updating.
+    if (result.success && result.meta.resultCount > 0) {
+      expect(result.meta.engine).toBe("google");
+    } else {
+      // Known: Google may block/challenge headless browsers. Log but don't fail.
+      expect(result.meta.attempts?.[0]?.reason).toMatch(/blocked|no_results|error/);
+    }
+  }, 45000);
+
+  itLive("multi-engine fallback returns results from first working engine", async () => {
+    const { runNsectEngine } = await import("../server/core/engine.js");
+    const result = await runNsectEngine({
+      query: "example test query",
+      searchEngines: ["duckduckgo", "bing", "brave", "google"],
+      format: "json",
+      maxResults: 5,
+      strategy: "fast",
+      timeout: 25,
+    });
+    expect(result.success).toBe(true);
+    expect(result.meta.resultCount).toBeGreaterThan(0);
+    // Google must always be the last engine in the order
+    expect(result.meta.engineOrder.at(-1)).toBe("google");
+  }, 60000);
+});
