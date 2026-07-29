@@ -164,15 +164,15 @@ server.tool(
   "run-engine",
   [
     "Run a page extraction job through the Nsect engine API.",
-    "Supports five loading methods: direct, wait, scroll, timed, and spa.",
+    "Supports five strategies: auto (default), fast, patient, spa, and scroll.",
     "Supports output formats: text, html, markdown, json, and links.",
   ].join("\n"),
   {
     url: z.string().url().describe("Absolute page URL including protocol."),
     format: z.enum(["text", "html", "markdown", "json", "links"]).default("text"),
-    method: z.enum(["direct", "wait", "scroll", "timed", "spa"]).default("direct"),
+    strategy: z.enum(["auto", "fast", "patient", "spa", "scroll"]).default("auto"),
     verbose: z.boolean().default(false).describe("Include noisy page regions when true."),
-    selector: z.string().optional().describe("Required when method='wait'."),
+    selector: z.string().optional().describe("CSS selector to wait for when strategy='patient'."),
     timeout: z.number().int().min(1).max(180).default(30),
     scroll_count: z.number().int().min(1).max(500).default(20),
     scroll_delay: z.number().int().min(50).max(10000).default(800),
@@ -182,7 +182,7 @@ server.tool(
     const payload = await callEngineApi({
       url: params.url,
       format: params.format,
-      method: params.method,
+      strategy: params.strategy,
       verbose: params.verbose,
       selector: params.selector,
       timeout: params.timeout,
