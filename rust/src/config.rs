@@ -211,4 +211,35 @@ mod tests {
         let env = vec![("NSECT_HOSTED".to_string(), "0".to_string())];
         assert_eq!(resolve_mode(&env), Mode::Local);
     }
+
+    #[test]
+    fn solver_config_disabled_when_no_api_key() {
+        // SolverConfig with empty key should be disabled
+        let cfg = SolverConfig {
+            enabled: false,
+            provider: "capsolver".to_string(),
+            api_key: String::new(),
+            timeout: 60,
+            kinds: Vec::new(),
+        };
+        assert!(!cfg.enabled);
+    }
+
+    #[test]
+    fn solver_config_enabled_when_api_key_set() {
+        let cfg = SolverConfig {
+            enabled: true,
+            provider: "capsolver".to_string(),
+            api_key: "test-key".to_string(),
+            timeout: 60,
+            kinds: vec![
+                "cloudflare_turnstile".to_string(),
+                "hcaptcha".to_string(),
+            ],
+        };
+        assert!(cfg.enabled);
+        assert_eq!(cfg.provider, "capsolver");
+        assert_eq!(cfg.kinds.len(), 2);
+        assert!(cfg.kinds.contains(&"cloudflare_turnstile".to_string()));
+    }
 }

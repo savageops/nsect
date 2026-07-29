@@ -327,4 +327,47 @@ mod tests {
         let hc = SIGNATURES.iter().find(|s| s.kind == "hcaptcha").unwrap();
         assert!(!hc.auto_resolvable);
     }
+
+    #[test]
+    fn all_signatures_have_non_empty_kind_and_label() {
+        for sig in SIGNATURES.iter() {
+            assert!(!sig.kind.is_empty(), "signature kind must not be empty");
+            assert!(!sig.label.is_empty(), "signature label must not be empty");
+        }
+    }
+
+    #[test]
+    fn blocked_signature_is_not_auto_resolvable() {
+        let blocked = SIGNATURES.iter().find(|s| s.kind == "blocked");
+        assert!(blocked.is_some());
+        assert!(!blocked.unwrap().auto_resolvable);
+    }
+
+    #[test]
+    fn recaptcha_signature_exists_and_not_resolvable() {
+        let recaptcha = SIGNATURES.iter().find(|s| s.kind == "recaptcha");
+        assert!(recaptcha.is_some());
+        assert!(!recaptcha.unwrap().auto_resolvable);
+    }
+
+    #[test]
+    fn match_pattern_works_case_insensitively() {
+        assert!(match_pattern("(?i)just a moment", "Just A Moment"));
+        assert!(match_pattern("(?i)just a moment", "JUST A MOMENT"));
+        assert!(!match_pattern("(?i)just a moment", "nothing here"));
+    }
+
+    #[test]
+    fn match_pattern_handles_special_regex_chars() {
+        assert!(match_pattern("/sorry/", "/sorry/index"));
+        assert!(!match_pattern("/sorry/", "/ok/"));
+    }
+
+    #[test]
+    fn challenge_info_none_is_not_detected() {
+        let info = ChallengeInfo::none();
+        assert!(!info.detected);
+        assert!(info.resolved);
+        assert_eq!(info.waited_ms, 0);
+    }
 }

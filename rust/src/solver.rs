@@ -248,3 +248,69 @@ async fn http_post_json(url: &str, body: &serde_json::Value) -> Result<SolverRes
     let solver_resp: SolverResponse = resp.json().await?;
     Ok(solver_resp)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_solver_eligible_for_api_solvable_kinds() {
+        assert!(is_solver_eligible("cloudflare_turnstile"));
+        assert!(is_solver_eligible("cloudflare"));
+        assert!(is_solver_eligible("hcaptcha"));
+        assert!(is_solver_eligible("recaptcha"));
+    }
+
+    #[test]
+    fn is_solver_eligible_rejects_non_api_kinds() {
+        assert!(!is_solver_eligible("perimeterx"));
+        assert!(!is_solver_eligible("datadome"));
+        assert!(!is_solver_eligible("blocked"));
+        assert!(!is_solver_eligible("akamai"));
+        assert!(!is_solver_eligible("generic"));
+        assert!(!is_solver_eligible("unknown"));
+    }
+
+    #[test]
+    fn endpoints_returns_known_providers() {
+        assert!(endpoints("capsolver").is_some());
+        assert!(endpoints("twocaptcha").is_some());
+        assert!(endpoints("anticaptcha").is_some());
+        assert!(endpoints("fakeprovider").is_none());
+    }
+
+    #[test]
+    fn task_type_maps_correctly_for_capsolver() {
+        assert_eq!(
+            task_type("capsolver", "cloudflare_turnstile"),
+            Some("AntiTurnstileTaskProxyLess")
+        );
+        assert_eq!(
+            task_type("capsolver", "hcaptcha"),
+            Some("HCaptchaTaskProxyLess")
+        );
+        assert_eq!(
+            task_type("capsolver", "recaptcha"),
+            Some("RecaptchaV2TaskProxyless")
+        );
+    }
+
+    #[test]
+    fn task_type_maps_correctly_for_twocaptcha() {
+        assert_eq!(
+            task_type("twocaptcha", "cloudflare"),
+            Some("TurnstileTaskProxyless")
+        );
+        assert_eq!(
+            task_type("twocaptcha", "hcaptcha"),
+            Some("HCaptchaTaskProxyless")
+        );
+    }
+
+    #[test]
+    fn task_type_returns_none_for_unsupported_combo() {
+        assert!(task_type("capsolver", "perimeterx").is_none());
+        assert!(task_type("fakeprovider", "cloudflare_turnstile").is_none());
+        assert!(task_type("capsolver", "unknown_kind").is_none());
+    }
+}
