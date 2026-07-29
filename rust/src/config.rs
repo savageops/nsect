@@ -19,6 +19,17 @@ impl Mode {
     }
 }
 
+/// Optional challenge-solver configuration. When no API key is set, the solver
+/// is disabled and challenges fail honestly (mirrors JS resolveSolverConfig).
+#[derive(Clone, Debug)]
+pub struct SolverConfig {
+    pub enabled: bool,
+    pub provider: String,
+    pub api_key: String,
+    pub timeout: u64,
+    pub kinds: Vec<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Config {
     pub mode: Mode,
@@ -26,6 +37,7 @@ pub struct Config {
     /// Admin secret. None in local mode; required (non-empty) in hosted mode.
     pub admin_key: Option<String>,
     pub db_path: PathBuf,
+    pub solver: SolverConfig,
     pub invidious_instances: Vec<String>,
     pub piped_instances: Vec<String>,
     pub yt_dlp_commands: Vec<String>,
@@ -62,11 +74,52 @@ impl Config {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("data/keys.sqlite"));
 
+        let solver = {
+            let api_key = env::var("NSECT_SOLVER_API_KEY")
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if api_key.is_empty() {
+                SolverConfig {
+                    enabled: false,
+                    provider: "capsolver".to_string(),
+                    api_key: String::new(),
+                    timeout: 60,
+                    kinds: Vec::new(),
+                }
+            } else {
+                let provider = env::var("NSECT_SOLVER_PROVIDER")
+                    .unwrap_or_else(|_| "capsolver".to_string())
+                    .trim()
+                    .to_string();
+                let timeout = env::var("NSECT_SOLVER_TIMEOUT")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(60);
+                let kinds = env::var("NSECT_SOLVER_KINDS")
+                    .unwrap_or_else(|_| {
+                        "cloudflare_turnstile,cloudflare,hcaptcha,recaptcha".to_string()
+                    })
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>();
+                SolverConfig {
+                    enabled: true,
+                    provider,
+                    api_key,
+                    timeout,
+                    kinds,
+                }
+            }
+        };
+
         Self {
             mode,
             port,
             admin_key,
             db_path,
+            solver,
             invidious_instances: parse_csv_env("NSECT_INVIDIOUS_INSTANCES").unwrap_or_else(|| {
                 vec![
                     "https://invidious.nerdvpn.de".to_string(),

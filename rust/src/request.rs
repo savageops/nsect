@@ -143,6 +143,9 @@ pub struct NormalizedEngineRequest {
     pub screenshot_path: Option<PathBuf>,
     pub pdf_path: Option<PathBuf>,
     pub headless: bool,
+    /// Optional solver config (threaded from AppState.config, not from HTTP input).
+    /// When None or disabled, interactive challenges fail honestly.
+    pub solver_config: Option<crate::config::SolverConfig>,
 }
 
 #[derive(Debug, Error, Clone)]
@@ -276,6 +279,7 @@ pub fn normalize_engine_request(
         } else {
             true
         },
+        solver_config: None,
     })
 }
 

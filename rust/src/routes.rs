@@ -176,7 +176,7 @@ async fn engine(
         return response;
     }
 
-    let params = match normalize_engine_request(
+    let mut params = match normalize_engine_request(
         payload,
         EngineNormalizationOptions {
             allow_file_output: false,
@@ -189,6 +189,10 @@ async fn engine(
             return auth::json_error(status, body);
         }
     };
+
+    // Thread the solver config from AppState into the engine params so the
+    // challenge-blocked branch can attempt interactive challenge solving.
+    params.solver_config = Some(state.config.solver.clone());
 
     let result = run_nsect_engine(params).await;
     if !result.success {

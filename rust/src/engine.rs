@@ -25,6 +25,7 @@ use crate::{
     models::{DiscoveredLink, PageContent, SearchResultItem},
     request::NormalizedEngineRequest,
     search::{build_search_url, decode_search_result_url, is_search_blocked, search_engine_label},
+    solver,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -346,14 +347,53 @@ fn run_page_extraction(tab: &Tab, params: &NormalizedEngineRequest) -> Result<(P
         .context("page did not finish navigation")?;
     let challenge_info = apply_strategy(tab, params)?;
 
-    // If a challenge was detected and not resolved, try the solver if configured.
+    // If a challenge was detected and not resolved, try the solver if configured
+    // for this challenge kind (mirrors JS engine.js:782 solver branch).
     if challenge_info.detected && !challenge_info.resolved {
-        // Solver would go here — requires solver config threaded through params.
-        // For now, return an honest error matching the JS CHALLENGE_BLOCKED path.
-        return Err(anyhow!(
-            "CHALLENGE_BLOCKED: Challenge from {} detected but not resolved",
-            challenge_info.label.as_deref().unwrap_or("unknown")
-        ));
+        let kind = challenge_info.kind.as_deref().unwrap_or("");
+        let solver_cfg = &params.solver_config;
+        let eligible = solver::is_solver_eligible(kind)
+            && solver_cfg.as_ref().is_some_and(|c| c.enabled && c.kinds.iter().any(|k| k == kind));
+
+        if eligible {
+            let cfg = solver_cfg.as_ref().unwrap();
+            // solver runs async but we're in a blocking context — use
+            // tokio::block_on via the runtime handle. This is safe because
+            // run_nsect_engine_blocking is already in spawn_blocking.
+            let solve_result = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(
+                    solver::attempt_solve(tab, kind, &cfg.provider, &cfg.api_key, cfg.timeout),
+                )
+            });
+            match solve_result {
+                Ok(true) => {
+                    // Challenge solved — fall through to extraction.
+                }
+                Ok(false) => {
+                    return Err(anyhow!(
+                        "CHALLENGE_BLOCKED: Solver returned false for {} challenge",
+                        challenge_info.label.as_deref().unwrap_or("unknown")
+                    ));
+                }
+                Err(e) => {
+                    return Err(anyhow!(
+                        "CHALLENGE_BLOCKED: Challenge from {} could not be solved: {}",
+                        challenge_info.label.as_deref().unwrap_or("unknown"),
+                        e
+                    ));
+                }
+            }
+        } else {
+            return Err(anyhow!(
+                "CHALLENGE_BLOCKED: Challenge from {} detected but not resolved{}",
+                challenge_info.label.as_deref().unwrap_or("unknown"),
+                if challenge_info.interactive == Some(true) {
+                    " (interactive challenge — needs a solver service)"
+                } else {
+                    " within the challenge timeout"
+                }
+            ));
+        }
     }
 
     let content = extract_page_content(tab, params.verbose)?;
