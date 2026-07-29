@@ -585,4 +585,194 @@ mod tests {
         let fail = result.unwrap_err();
         assert_eq!(fail.code, "revoked");
     }
+
+    #[test]
+    fn rate_limit_blocks_after_exceeding() {
+        let dir = tempdir().unwrap();
+        let store = KeyStore::open(&dir.path().join("k.sqlite")).unwrap();
+        let created = store
+            .create_key(CreateKeyInput {
+                label: Some("rl-test".to_string()),
+                rate_limit: Some(2),
+                search_cooldown_seconds: Some(6),
+                expires_in_seconds: None,
+            })
+            .unwrap();
+        let plaintext = created.api_key.unwrap();
+
+        assert!(store.validate_key(&plaintext, ValidationContext { enforce_search_cooldown: false }).is_ok());
+        assert!(store.validate_key(&plaintext, ValidationContext { enforce_search_cooldown: false }).is_ok());
+        let result = store.validate_key(&plaintext, ValidationContext { enforce_search_cooldown: false });
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "rate_limited");
+    }
+
+    #[test]
+    fn search_cooldown_enforced_when_enabled() {
+        let dir = tempdir().unwrap();
+        let store = KeyStore::open(&dir.path().join("k.sqlite")).unwrap();
+        let created = store
+            .create_key(CreateKeyInput {
+                label: Some("cd-test".to_string()),
+                rate_limit: Some(100),
+                search_cooldown_seconds: Some(6),
+                expires_in_seconds: None,
+            })
+            .unwrap();
+        let plaintext = created.api_key.unwrap();
+
+        // First search validates
+        assert!(store.validate_key(&plaintext, ValidationContext { enforce_search_cooldown: true }).is_ok());
+        // Immediate second search is blocked
+        let result = store.validate_key(&plaintext, ValidationContext { enforce_search_cooldown: true });
+        assert!(result.is_err());
+        let fail = result.unwrap_err();
+        assert_eq!(fail.code, "cooldown");
+        assert!(fail.retry_after.is_some());
+        assert!(fail.cooldown_seconds.is_some());
+    }
+
+    #[test]
+    fn search_cooldown_not_enforced_when_disabled() {
+        let dir = tempdir().unwrap();
+        let store = KeyStore::open(&dir.path().join("k.sqlite")).unwrap();
+        let created = store
+            .create_key(CreateKeyInput {
+                label: Some("no-cd".to_string()),
+                rate_limit: Some(100),
+                search_cooldown_seconds: Some(6),
+                expires_in_seconds: None,
+            })
+            .unwrap();
+        let plaintext = created.api_key.unwrap();
+
+        // Multiple validations with cooldown disabled should all pass
+        assert!(store.validate_key(&plaintext, ValidationContext { enforce_search_cooldown: false }).is_ok());
+        assert!(store.validate_key(&plaintext, ValidationContext { enforce_search_cooldown: false }).is_ok());
+        assert!(store.validate_key(&plaintext, ValidationContext { enforce_search_cooldown: false }).is_ok());
+    }
+
+    #[test]
+    fn empty_key_rejected() {
+        let dir = tempdir().unwrap();
+        let store = KeyStore::open(&dir.path().join("k.sqlite")).unwrap();
+        let result = store.validate_key("", ValidationContext { enforce_search_cooldown: false });
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "auth_required");
+    }
+
+    #[test]
+    fn whitespace_only_key_rejected() {
+        let dir = tempdir().unwrap();
+        let store = KeyStore::open(&dir.path().join("k.sqlite")).unwrap();
+        let result = store.validate_key("   ", ValidationContext { enforce_search_cooldown: false });
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "auth_required");
+    }
+
+    #[test]
+    fn unknown_key_rejected() {
+        let dir = tempdir().unwrap();
+        let store = KeyStore::open(&dir.path().join("k.sqlite")).unwrap();
+        let result = store.validate_key(
+            "sk_nonexistent00000000000000000000000",
+            ValidationContext { enforce_search_cooldown: false },
+        );
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "invalid_key");
+    }
+
+    #[test]
+    fn list_keys_returns_masked_hashes() {
+        let dir = tempdir().unwrap();
+        let store = KeyStore::open(&dir.path().join("k.sqlite")).unwrap();
+        store
+            .create_key(CreateKeyInput {
+                label: Some("a".to_string()),
+                rate_limit: None,
+                search_cooldown_seconds: None,
+                expires_in_seconds: None,
+            })
+            .unwrap();
+        store
+            .create_key(CreateKeyInput {
+                label: Some("b".to_string()),
+                rate_limit: None,
+                search_cooldown_seconds: None,
+                expires_in_seconds: None,
+            })
+            .unwrap();
+        let keys = store.list_keys().unwrap();
+        assert_eq!(keys.len(), 2);
+        for key in &keys {
+            assert!(key.key_hash.ends_with('…'));
+            assert!(key.api_key.is_none()); // never plaintext
+        }
+    }
+
+    #[test]
+    fn get_key_returns_none_for_unknown() {
+        let dir = tempdir().unwrap();
+        let store = KeyStore::open(&dir.path().join("k.sqlite")).unwrap();
+        let result = store.get_key("sk_nonexistent00000000000000000000000", true).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn revoke_unknown_key_returns_false() {
+        let dir = tempdir().unwrap();
+        let store = KeyStore::open(&dir.path().join("k.sqlite")).unwrap();
+        let result = store.revoke_key("sk_nonexistent00000000000000000000000").unwrap();
+        assert!(!result);
+    }
+
+    #[test]
+    fn use_count_increments_on_validation() {
+        let dir = tempdir().unwrap();
+        let store = KeyStore::open(&dir.path().join("k.sqlite")).unwrap();
+        let created = store
+            .create_key(CreateKeyInput {
+                label: Some("count".to_string()),
+                rate_limit: Some(100),
+                search_cooldown_seconds: Some(6),
+                expires_in_seconds: None,
+            })
+            .unwrap();
+        let plaintext = created.api_key.unwrap();
+
+        store.validate_key(&plaintext, ValidationContext { enforce_search_cooldown: false }).unwrap();
+        store.validate_key(&plaintext, ValidationContext { enforce_search_cooldown: false }).unwrap();
+
+        let info = store.get_key(&plaintext, true).unwrap().unwrap();
+        assert_eq!(info.use_count, 2);
+    }
+
+    #[test]
+    fn hash_key_never_stored_as_plaintext() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("k.sqlite");
+        let store = KeyStore::open(&path).unwrap();
+        let created = store
+            .create_key(CreateKeyInput {
+                label: Some("check".to_string()),
+                rate_limit: None,
+                search_cooldown_seconds: None,
+                expires_in_seconds: None,
+            })
+            .unwrap();
+        let plaintext = created.api_key.unwrap();
+
+        // Open the DB raw and verify the plaintext doesn't appear
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let rows: Vec<String> = conn
+            .prepare("SELECT key_hash FROM api_keys")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(rows.len(), 1);
+        assert_ne!(rows[0], plaintext);
+        assert_eq!(rows[0], hash_key(&plaintext));
+    }
 }
