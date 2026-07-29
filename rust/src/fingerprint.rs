@@ -85,17 +85,63 @@ const TIMEZONES: &[&str] = &[
     "Pacific/Auckland",
 ];
 const PLATFORMS: &[&str] = &["Win32", "MacIntel", "Linux x86_64"];
-const WEBGL_VENDORS: &[&str] = &[
-    "Google Inc. (NVIDIA)",
-    "Google Inc. (Intel)",
-    "Google Inc. (AMD)",
-    "Google Inc. (Apple)",
+
+/// Coherent WebGL vendor/renderer pairs, grouped by platform. Anti-bot ML
+/// models look for impossible hardware combinations (e.g. Apple GPU vendor
+/// with NVIDIA ANGLE Direct3D11 renderer). Picking vendor and renderer
+/// together as a matched pair prevents this — mirrors the JS fingerprint.js
+/// WEBGL_PROFILES fix.
+struct WebglProfile {
+    vendor: &'static str,
+    renderer: &'static str,
+}
+
+const WEBGL_WINDOWS: &[WebglProfile] = &[
+    WebglProfile {
+        vendor: "Google Inc. (NVIDIA)",
+        renderer: "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0)",
+    },
+    WebglProfile {
+        vendor: "Google Inc. (NVIDIA)",
+        renderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0)",
+    },
+    WebglProfile {
+        vendor: "Google Inc. (Intel)",
+        renderer: "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0)",
+    },
+    WebglProfile {
+        vendor: "Google Inc. (Intel)",
+        renderer: "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0)",
+    },
+    WebglProfile {
+        vendor: "Google Inc. (AMD)",
+        renderer: "ANGLE (AMD, AMD Radeon RX 580 Direct3D11 vs_5_0 ps_5_0)",
+    },
+    WebglProfile {
+        vendor: "Google Inc. (AMD)",
+        renderer: "ANGLE (AMD, AMD Radeon RX 6700 XT Direct3D11 vs_5_0 ps_5_0)",
+    },
 ];
-const WEBGL_RENDERERS: &[&str] = &[
-    "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0)",
-    "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0)",
-    "ANGLE (AMD, AMD Radeon RX 580 Direct3D11 vs_5_0 ps_5_0)",
-    "Apple GPU",
+
+const WEBGL_MAC: &[WebglProfile] = &[
+    WebglProfile { vendor: "Google Inc. (Apple)", renderer: "Apple GPU" },
+    WebglProfile { vendor: "Google Inc. (Apple)", renderer: "Apple M1" },
+    WebglProfile { vendor: "Google Inc. (Intel)", renderer: "Intel Inc., Intel(R) Iris(TM) Plus Graphics 645" },
+];
+
+const WEBGL_LINUX: &[WebglProfile] = &[
+    WebglProfile {
+        vendor: "Google Inc. (NVIDIA)",
+        renderer: "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER OpenGL ES 3.2)",
+    },
+    WebglProfile {
+        vendor: "Google Inc. (Intel)",
+        renderer: "Mesa Intel(R) UHD Graphics 630 (CFL GT2)",
+    },
+    WebglProfile {
+        vendor: "Google Inc. (AMD)",
+        renderer: "ANGLE (AMD, AMD Radeon RX 580 OpenGL ES 3.2)",
+    },
 ];
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -143,14 +189,26 @@ pub fn generate_fingerprint() -> FingerprintProfile {
         0
     };
 
+    // Pick a coherent WebGL profile matching the platform (Windows→Direct3D11,
+    // Mac→Metal/Apple GPU, Linux→OpenGL). Prevents impossible combinations.
+    let webgl_profiles: &[WebglProfile] = if platform == "Win32" {
+        WEBGL_WINDOWS
+    } else if platform == "MacIntel" {
+        WEBGL_MAC
+    } else {
+        WEBGL_LINUX
+    };
+    let webgl_idx = rand::rng().random_range(0..webgl_profiles.len());
+    let webgl_profile = &webgl_profiles[webgl_idx];
+
     FingerprintProfile {
         user_agent,
         viewport: Viewport { width, height },
         locale,
         timezone,
         platform,
-        webgl_vendor: pick_str(WEBGL_VENDORS),
-        webgl_renderer: pick_str(WEBGL_RENDERERS),
+        webgl_vendor: webgl_profile.vendor.to_string(),
+        webgl_renderer: webgl_profile.renderer.to_string(),
         color_depth: pick_num(&[24, 30, 32]),
         pixel_depth: pick_num(&[24, 30, 32]),
         device_memory: pick_num(&[2, 4, 8, 16]),
