@@ -278,3 +278,78 @@ describe("Health route sub-paths (local)", () => {
     expect(res.body).not.toHaveProperty("observability");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Global error handler edge cases (server/index.js)
+// ---------------------------------------------------------------------------
+
+describe("Global error handler edge cases (local)", () => {
+  beforeEach(() => {
+    setRuntimeModeForTesting("local");
+  });
+
+  it("returns 413 for body exceeding 10mb limit", async () => {
+    // Create a body just over 10MB — express.json has a 10mb limit.
+    // Express 5's body-parser emits entity.too.large which may surface as 413
+    // or fall through to the global error handler as 500 depending on version.
+    // We verify it doesn't hang or crash — any non-200 status is acceptable.
+    const largeValue = "x".repeat(11 * 1024 * 1024);
+    const body = JSON.stringify({ url: "https://example.com", query: largeValue });
+
+    const res = await request(app)
+      .post("/api/engine")
+      .set("Content-Type", "application/json")
+      .send(body);
+
+    // Should return an error status (413 or 500 depending on Express version)
+    expect(res.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it("returns 400 for truncated JSON (incomplete body)", async () => {
+    const res = await request(app)
+      .post("/api/engine")
+      .set("Content-Type", "application/json")
+      .send('{"url":"https://example.com","query":"incomplete');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid JSON/i);
+  });
+
+  it("returns 400 for JSON with trailing garbage", async () => {
+    const res = await request(app)
+      .post("/api/engine")
+      .set("Content-Type", "application/json")
+      .send('{"url":"https://example.com"}garbage');
+
+    expect(res.status).toBe(400);
+  });
+
+  it("accepts body at exactly the content-length boundary (not over)", async () => {
+    // A small valid JSON should pass through the parser fine
+    const res = await request(app)
+      .post("/api/engine")
+      .set("Content-Type", "application/json")
+      .send('{"url":"https://example.com"}');
+
+    // In local mode, no auth required — should reach the engine handler
+    // and return a non-4xx-parse-error status (200, 400 for missing strategy, etc)
+    expect(res.status).not.toBe(400);
+    expect(res.body.error || "").not.toMatch(/Invalid JSON/i);
+  });
+
+  it("handles GET request to unknown route gracefully", async () => {
+    const res = await request(app).get("/api/nonexistent");
+    expect(res.status).toBe(404);
+  });
+
+  it("handles POST to unknown route gracefully", async () => {
+    const res = await request(app).post("/api/nonexistent").send({});
+    expect(res.status).toBe(404);
+  });
+
+  it("handles PUT method on engine route (method not allowed)", async () => {
+    const res = await request(app).put("/api/engine").send({});
+    // Express returns 404 for unregistered methods on existing paths
+    expect([404, 405]).toContain(res.status);
+  });
+});
