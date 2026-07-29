@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::Arc,
+    sync::{Arc, LazyLock, Mutex},
     time::{Duration, Instant},
 };
 
@@ -42,6 +42,28 @@ use url::Url;
 use crate::AppState;
 
 const DEFAULT_TIMEOUT_SECONDS: u64 = 20;
+
+/// Process-level circuit breaker for dead third-party instances (mirrors JS).
+/// When an Invidious/Piped instance fails, it's marked down for 5 minutes so
+/// subsequent requests skip it instead of burning a full timeout per dead host.
+const INSTANCE_COOLDOWN_SECS: u64 = 300; // 5 minutes
+static DOWN_INSTANCES: LazyLock<Mutex<HashMap<String, Instant>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn is_instance_down(url: &str) -> bool {
+    let map = DOWN_INSTANCES.lock().expect("down instances mutex poisoned");
+    if let Some(&expiry) = map.get(url) {
+        if Instant::now() < expiry {
+            return true;
+        }
+    }
+    false
+}
+
+fn mark_instance_down(url: &str) {
+    let mut map = DOWN_INSTANCES.lock().expect("down instances mutex poisoned");
+    map.insert(url.to_string(), Instant::now() + Duration::from_secs(INSTANCE_COOLDOWN_SECS));
+}
 const MIN_TIMEOUT_SECONDS: u64 = 5;
 const MAX_TIMEOUT_SECONDS: u64 = 120;
 const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -702,6 +724,9 @@ async fn run_invidious_method(
     let mut last_error = None;
 
     for instance in &context.state.config.invidious_instances {
+        if is_instance_down(instance) {
+            continue;
+        }
         let endpoint = format!(
             "{}/api/v1/captions/{}",
             instance.trim_end_matches('/'),
@@ -761,7 +786,7 @@ async fn run_invidious_method(
         }
     }
 
-    Err(last_error.unwrap_or_else(|| anyhow!("All Invidious instances failed")))
+    Err(last_error.unwrap_or_else(|| anyhow!("All Invidious instances failed or on cooldown")))
 }
 
 async fn run_piped_method(
@@ -771,6 +796,9 @@ async fn run_piped_method(
     let mut last_error = None;
 
     for instance in &context.state.config.piped_instances {
+        if is_instance_down(instance) {
+            continue;
+        }
         let endpoint = format!(
             "{}/streams/{}",
             instance.trim_end_matches('/'),
@@ -823,15 +851,17 @@ async fn run_piped_method(
                 }
             }
             Ok(response) => {
+                mark_instance_down(instance);
                 last_error = Some(anyhow!("HTTP {} from {}", response.status, instance));
             }
             Err(error) => {
+                mark_instance_down(instance);
                 last_error = Some(error);
             }
         }
     }
 
-    Err(last_error.unwrap_or_else(|| anyhow!("All Piped instances failed")))
+    Err(last_error.unwrap_or_else(|| anyhow!("All Piped instances failed or on cooldown")))
 }
 
 async fn run_yt_dlp_method(

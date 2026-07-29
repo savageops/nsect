@@ -199,6 +199,7 @@ async fn engine(
         let status = match result.error_code.as_deref() {
             Some("BROWSER_LAUNCH") => StatusCode::SERVICE_UNAVAILABLE,
             Some("UPSTREAM_REQUEST") => StatusCode::BAD_GATEWAY,
+            Some("CHALLENGE_BLOCKED") => StatusCode::BAD_GATEWAY,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         return (
