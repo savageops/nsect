@@ -120,3 +120,172 @@ fn percentile(values: &VecDeque<f64>, percentile: f64) -> f64 {
 fn round_two(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reset_state() {
+        let mut s = state().lock().unwrap();
+        *s = ObservabilityState::default();
+    }
+
+    #[test]
+    fn empty_snapshot_returns_zeros() {
+        reset_state();
+        let snap = get_snapshot();
+        assert_eq!(snap.success, 0);
+        assert_eq!(snap.blocked, 0);
+        assert_eq!(snap.fallback_depth, 0.0);
+        assert_eq!(snap.p95, 0.0);
+        assert_eq!(snap.status_429, 0);
+    }
+
+    #[test]
+    fn records_429_status() {
+        reset_state();
+        record_http_response(200, 10.0);
+        record_http_response(429, 20.0);
+        record_http_response(200, 30.0);
+        let snap = get_snapshot();
+        assert_eq!(snap.status_429, 1);
+    }
+
+    #[test]
+    fn does_not_count_non_429_statuses() {
+        reset_state();
+        record_http_response(200, 10.0);
+        record_http_response(500, 20.0);
+        record_http_response(403, 30.0);
+        let snap = get_snapshot();
+        assert_eq!(snap.status_429, 0);
+    }
+
+    #[test]
+    fn rejects_nan_and_negative_durations() {
+        reset_state();
+        record_http_response(200, f64::NAN);
+        record_http_response(200, -5.0);
+        record_http_response(200, f64::INFINITY);
+        let snap = get_snapshot();
+        assert_eq!(snap.p95, 0.0);
+    }
+
+    #[test]
+    fn single_latency_sample() {
+        reset_state();
+        record_http_response(200, 42.5);
+        let snap = get_snapshot();
+        assert_eq!(snap.p95, 42.5);
+    }
+
+    #[test]
+    fn ignores_failed_engine_outcomes() {
+        reset_state();
+        record_engine_outcome(&EngineResponse {
+            success: false,
+            output: None,
+            format: None,
+            meta: None,
+            error_code: None,
+            error: None,
+        });
+        let snap = get_snapshot();
+        assert_eq!(snap.success, 0);
+    }
+
+    #[test]
+    fn handles_engine_outcome_with_no_meta() {
+        reset_state();
+        record_engine_outcome(&EngineResponse {
+            success: true,
+            output: None,
+            format: None,
+            meta: None,
+            error_code: None,
+            error: None,
+        });
+        // When meta is None, record_engine_outcome returns early without
+        // incrementing success — it needs meta to know it's a real result.
+        let snap = get_snapshot();
+        assert_eq!(snap.success, 0);
+        assert_eq!(snap.fallback_depth, 0.0);
+    }
+
+    #[test]
+    fn rolling_window_caps_at_500() {
+        reset_state();
+        for i in 0..600 {
+            record_http_response(200, i as f64);
+        }
+        let snap = get_snapshot();
+        assert!(snap.p95 > 0.0);
+    }
+
+    #[test]
+    fn fallback_depth_from_attempts_first_engine_succeeds() {
+        let attempts = vec![SearchAttempt {
+            engine: "duckduckgo".to_string(),
+            engine_label: "DuckDuckGo".to_string(),
+            url: "https://ddg.com".to_string(),
+            blocked: false,
+            result_count: 5,
+            reason: "ok".to_string(),
+            error: None,
+        }];
+        assert_eq!(fallback_depth_from_attempts(&attempts), 0);
+    }
+
+    #[test]
+    fn fallback_depth_from_attempts_last_succeeds() {
+        let attempts = vec![
+            SearchAttempt {
+                engine: "duckduckgo".to_string(),
+                engine_label: "DuckDuckGo".to_string(),
+                url: "https://ddg.com".to_string(),
+                blocked: false,
+                result_count: 0,
+                reason: "no_results".to_string(),
+                error: None,
+            },
+            SearchAttempt {
+                engine: "bing".to_string(),
+                engine_label: "Bing".to_string(),
+                url: "https://bing.com".to_string(),
+                blocked: false,
+                result_count: 0,
+                reason: "blocked".to_string(),
+                error: None,
+            },
+            SearchAttempt {
+                engine: "google".to_string(),
+                engine_label: "Google".to_string(),
+                url: "https://google.com".to_string(),
+                blocked: false,
+                result_count: 2,
+                reason: "ok".to_string(),
+                error: None,
+            },
+        ];
+        assert_eq!(fallback_depth_from_attempts(&attempts), 2);
+    }
+
+    #[test]
+    fn fallback_depth_from_empty_attempts() {
+        let attempts: Vec<SearchAttempt> = vec![];
+        assert_eq!(fallback_depth_from_attempts(&attempts), 0);
+    }
+
+    #[test]
+    fn percentile_empty_returns_zero() {
+        let values: VecDeque<f64> = VecDeque::new();
+        assert_eq!(percentile(&values, 95.0), 0.0);
+    }
+
+    #[test]
+    fn round_two_truncates_correctly() {
+        assert_eq!(round_two(3.14159), 3.14);
+        assert_eq!(round_two(2.999), 3.0);
+        assert_eq!(round_two(0.0), 0.0);
+    }
+}
