@@ -225,10 +225,22 @@ pub fn detect_challenge(tab: &Tab) -> ChallengeInfo {
             let bare_host = url::Url::parse(&url)
                 .map(|u| u.host_str().unwrap_or("").to_string())
                 .unwrap_or_default();
-            let title = tab.get_url(); // headless_chrome doesn't expose title easily; use URL as proxy
-            // If the page URL is just the host (no meaningful path) + no text → block.
-            let title_looks_like_block = title == bare_host || title == bare_host.replace("www.", "");
-            if title_looks_like_block || bare_host.is_empty() {
+            // Get the actual page title via evaluate (mirrors JS page.title()).
+            // The old code used tab.get_url() as an imprecise proxy — that caused
+            // false positives (bare-host URL flagged even with descriptive title)
+            // and false negatives (PX block at a pathed URL not flagged).
+            let title = tab
+                .evaluate("document.title || ''", true)
+                .ok()
+                .and_then(|r| r.value)
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                .unwrap_or_default();
+            // Title equals the bare hostname (e.g. "yelp.com") OR is empty —
+            // both are strong indicators of an interstitial block, not real content.
+            let title_looks_like_block = title.is_empty()
+                || title == bare_host
+                || title == bare_host.replace("www.", "");
+            if title_looks_like_block {
                 return ChallengeInfo {
                     detected: true,
                     kind: Some("blocked".to_string()),
