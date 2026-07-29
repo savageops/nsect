@@ -289,10 +289,6 @@ describe("Global error handler edge cases (local)", () => {
   });
 
   it("returns 413 for body exceeding 10mb limit", async () => {
-    // Create a body just over 10MB — express.json has a 10mb limit.
-    // Express 5's body-parser emits entity.too.large which may surface as 413
-    // or fall through to the global error handler as 500 depending on version.
-    // We verify it doesn't hang or crash — any non-200 status is acceptable.
     const largeValue = "x".repeat(11 * 1024 * 1024);
     const body = JSON.stringify({ url: "https://example.com", query: largeValue });
 
@@ -301,8 +297,8 @@ describe("Global error handler edge cases (local)", () => {
       .set("Content-Type", "application/json")
       .send(body);
 
-    // Should return an error status (413 or 500 depending on Express version)
-    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBe(413);
+    expect(res.body.error).toMatch(/too large/i);
   });
 
   it("returns 400 for truncated JSON (incomplete body)", async () => {

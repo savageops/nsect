@@ -99,6 +99,11 @@ function composeApp() {
     if (parseFailed) {
       return res.status(400).json({ error: "Invalid JSON request body." });
     }
+    // Express 5 body-parser emits entity.too.large without a .status property,
+    // so it falls through to the 500 catch-all. Map it explicitly to 413.
+    if (err?.type === "entity.too.large") {
+      return res.status(413).json({ error: "Request body too large. Maximum 10MB." });
+    }
     logError("http.unhandled_error", err);
     res.status(500).json({ error: "Internal server error" });
   });
