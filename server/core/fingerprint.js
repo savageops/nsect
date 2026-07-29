@@ -64,6 +64,37 @@ export function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+/**
+ * Coherent WebGL vendor/renderer pairs. Anti-bot ML models specifically look
+ * for impossible hardware combinations (e.g., Apple GPU vendor with NVIDIA
+ * ANGLE Direct3D11 renderer — impossible on any real device). These pairs are
+ * picked together so the vendor always matches the renderer's GPU vendor.
+ *
+ * The Direct3D11 renderers are Windows-only (ANGLE on Mac uses Metal, on Linux
+ * uses OpenGL). The pick is platform-aware so the renderer matches the OS
+ * implied by the User-Agent.
+ */
+const WEBGL_PROFILES = {
+  windows: [
+    { vendor: "Google Inc. (NVIDIA)", renderer: "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0)" },
+    { vendor: "Google Inc. (NVIDIA)", renderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0)" },
+    { vendor: "Google Inc. (Intel)", renderer: "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0)" },
+    { vendor: "Google Inc. (Intel)", renderer: "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0)" },
+    { vendor: "Google Inc. (AMD)", renderer: "ANGLE (AMD, AMD Radeon RX 580 Direct3D11 vs_5_0 ps_5_0)" },
+    { vendor: "Google Inc. (AMD)", renderer: "ANGLE (AMD, AMD Radeon RX 6700 XT Direct3D11 vs_5_0 ps_5_0)" },
+  ],
+  mac: [
+    { vendor: "Google Inc. (Apple)", renderer: "Apple GPU" },
+    { vendor: "Google Inc. (Apple)", renderer: "Apple M1" },
+    { vendor: "Google Inc. (Intel)", renderer: "Intel Inc., Intel(R) Iris(TM) Plus Graphics 645" },
+  ],
+  linux: [
+    { vendor: "Google Inc. (NVIDIA)", renderer: "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER OpenGL ES 3.2)" },
+    { vendor: "Google Inc. (Intel)", renderer: "Mesa Intel(R) UHD Graphics 630 (CFL GT2)" },
+    { vendor: "Google Inc. (AMD)", renderer: "ANGLE (AMD, AMD Radeon RX 580 OpenGL ES 3.2)" },
+  ],
+};
+
 export function generateFingerprint() {
   const ua = pick(USER_AGENTS);
   const vp = pick(VIEWPORTS);
@@ -74,16 +105,12 @@ export function generateFingerprint() {
     : ua.includes("Linux") ? "Linux x86_64"
     : pick(PLATFORMS);
 
-  const webglVendors = [
-    "Google Inc. (NVIDIA)", "Google Inc. (Intel)",
-    "Google Inc. (AMD)", "Google Inc. (Apple)",
-  ];
-  const webglRenderers = [
-    "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0)",
-    "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0)",
-    "ANGLE (AMD, AMD Radeon RX 580 Direct3D11 vs_5_0 ps_5_0)",
-    "Apple GPU",
-  ];
+  // Pick a coherent WebGL profile matching the platform (Windows→Direct3D11,
+  // Mac→Metal/Apple GPU, Linux→OpenGL). Prevents impossible combinations.
+  const webglProfileSet = platform === "Win32" ? WEBGL_PROFILES.windows
+    : platform === "MacIntel" ? WEBGL_PROFILES.mac
+    : WEBGL_PROFILES.linux;
+  const webgl = pick(webglProfileSet);
 
   return {
     userAgent: ua,
@@ -91,7 +118,7 @@ export function generateFingerprint() {
     locale,
     timezone: tz,
     platform,
-    webgl: { vendor: pick(webglVendors), renderer: pick(webglRenderers) },
+    webgl: { vendor: webgl.vendor, renderer: webgl.renderer },
     colorDepth: pick([24, 30, 32]),
     deviceMemory: pick([2, 4, 8, 16]),
     hardwareConcurrency: pick([2, 4, 6, 8, 12, 16]),

@@ -20,7 +20,6 @@ import {
   waitForChallengeResolution,
   hasSubstantiveContent,
   detectInfiniteScroll,
-  DEFAULT_CHALLENGE_TIMEOUT_MS,
 } from "./challenge.js";
 import { extractWithCascade } from "./extractor.js";
 import { attemptSolve, isSolverEligible } from "./solver.js";
@@ -283,42 +282,6 @@ async function scrollPage(page, scrollCount, scrollDelay) {
     }
     window.scrollTo(0, 0);
   }, scrollCount, scrollDelay);
-}
-
-async function extractContent(page, verbose) {
-  return page.evaluate((isVerbose, noiseSels) => {
-    const clone = document.cloneNode(true);
-
-    if (!isVerbose) {
-      for (const sel of noiseSels) {
-        clone.querySelectorAll(sel).forEach((el) => el.remove());
-      }
-    }
-
-    const title = document.title;
-    const url = window.location.href;
-    const html = clone.documentElement.outerHTML;
-
-    const body = clone.body || clone.documentElement;
-    const text = (body.innerText || body.textContent || "")
-      .replace(/\n{3,}/g, "\n\n").trim();
-
-    const links = Array.from(document.querySelectorAll("a[href]"))
-      .map((a) => ({
-        text: (a.textContent || "").trim().substring(0, 200),
-        href: a.href,
-      }))
-      .filter((l) => l.href && l.href.startsWith("http"));
-
-    const meta = {};
-    document.querySelectorAll("meta[property], meta[name]").forEach((m) => {
-      const key = m.getAttribute("property") || m.getAttribute("name");
-      const val = m.getAttribute("content");
-      if (key && val) meta[key] = val;
-    });
-
-    return { title, url, text, html, links, meta };
-  }, verbose, NOISE_SELECTORS);
 }
 
 function cleanText(value) {
@@ -623,7 +586,17 @@ async function runSearchWithFallback(page, options) {
 
       const pageSnapshot = await inspectSearchPage(page);
       const blocked = isSearchBlocked({ engine, ...pageSnapshot });
-      if (blocked) {
+      // Also check for challenge pages that isSearchBlocked's text patterns
+      // might miss (CF "Just a moment" etc.). A late challenge detect on the
+      // search result page catches blocks the blocklist doesn't cover.
+      let challengeBlocked = false;
+      if (!blocked) {
+        const searchChallenge = await detectChallenge(page);
+        if (searchChallenge?.detected && !searchChallenge?.autoResolvable) {
+          challengeBlocked = true;
+        }
+      }
+      if (blocked || challengeBlocked) {
         attempts.push({
           engine,
           engineLabel: searchEngineLabel(engine),
@@ -774,7 +747,7 @@ export async function runNsectEngine(params) {
       // the solver can't help (no solver configured, kind not eligible, or
       // solve attempt failed).
       if (challengeInfo?.detected && !challengeInfo?.resolved) {
-        const solverCfg = params.solver;
+        const solverCfg = normalized.solver;
         const eligible = isSolverEligible(challengeInfo.kind)
           && solverCfg?.enabled
           && solverCfg.kinds.includes(challengeInfo.kind);
@@ -924,6 +897,13 @@ export async function runNsectEngine(params) {
       error: err.message,
     };
   } finally {
-    await browser.close();
+    // Guard browser.close() — if the browser process is already dead or in a
+    // bad state, close() can throw and mask the original error from the catch
+    // block above. Never let cleanup failure shadow the real failure.
+    try {
+      await browser.close();
+    } catch {
+      // Best-effort cleanup; the original error (if any) is already captured.
+    }
   }
 }

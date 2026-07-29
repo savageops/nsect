@@ -141,11 +141,27 @@ function parseProxy(proxyValue, proxyUser, proxyPass) {
   let user = toOptionalString(proxyUser);
   let pass = toOptionalString(proxyPass);
 
-  // Extract embedded credentials user:pass@ from the URL if present.
-  const credMatch = proxy.match(/^[a-z]+:\/\/([^:]+):([^@]+)@/i);
-  if (credMatch) {
-    user = user || decodeURIComponent(credMatch[1]);
-    pass = pass || decodeURIComponent(credMatch[2]);
+  // Use the URL API to authoritatively parse embedded credentials. Regex
+  // approaches break on passwords containing @ or URL-encoded chars. The URL
+  // constructor handles all encoding correctly and lets us strip creds from
+  // the host URL in one place (the single owner of credential extraction).
+  try {
+    const parsed = new URL(proxy);
+    if (parsed.username && !user) {
+      user = decodeURIComponent(parsed.username);
+    }
+    if (parsed.password && !pass) {
+      pass = decodeURIComponent(parsed.password);
+    }
+    // Rebuild the host URL without credentials — --proxy-server can't carry auth.
+    if (parsed.username || parsed.password) {
+      parsed.username = "";
+      parsed.password = "";
+      host = parsed.toString();
+    }
+  } catch {
+    // Not a parseable URL (e.g., "host:port" without scheme) — leave as-is.
+    // The engine's buildBrowser handles the --proxy-server flag directly.
   }
 
   return { proxy: host, proxyUser: user, proxyPass: pass };

@@ -12,10 +12,10 @@ import {
  * deterministic challenge content. Lets us unit-test the signature matcher
  * without launching a browser.
  */
-function fakePage({ url = "https://example.com", text = "", markers = [], title = "Example Page" } = {}) {
+function fakePage({ url = "https://example.com", text = "", markers = [], title: pageTitle = "Example Page" } = {}) {
   return {
     url: () => url,
-    async title() { return title; },
+    title: async () => pageTitle,
     async evaluate(fn, ...args) {
       if (typeof fn === "function") {
         const src = fn.toString();
@@ -137,6 +137,19 @@ describe("detectChallenge", () => {
       text: "OK",
       title: "Service Status",
       markers: [],
+    });
+    const result = await detectChallenge(page);
+    expect(result).toBeNull();
+  });
+
+  it("does NOT false-positive on a canvas/image-only page with empty text", async () => {
+    // A WebGL app, PDF.js viewer, or image-only page has zero innerText but
+    // contains canvas/img/iframe — must not be flagged as a bot block.
+    const page = fakePage({
+      url: "https://example.com/viewer",
+      text: "",
+      title: "example.com",
+      markers: ["canvas"],
     });
     const result = await detectChallenge(page);
     expect(result).toBeNull();

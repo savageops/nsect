@@ -71,19 +71,30 @@ server.tool(
     "Output is text by default; pass format='markdown' for cleaner prose or 'json' for structured.",
   ].join("\n"),
   {
-    url: z.string().optional().describe("URL to fetch (page or YouTube video)."),
-    query: z.string().optional().describe("Search query (when fetching search results, not a page)."),
+    url: z.string().max(2048).optional().describe("URL to fetch (page or YouTube video). Must be http:// or https://."),
+    query: z.string().max(1000).optional().describe("Search query (when fetching search results, not a page)."),
     format: z.enum(["text", "html", "markdown", "json", "links"]).default("markdown"),
     strategy: z.enum(["auto", "fast", "patient", "spa", "scroll"]).default("auto"),
     timeout: z.number().int().min(1).max(180).default(30),
     max_results: z.number().int().min(1).max(50).default(10),
   },
   async (params) => {
+    // Reject ambiguous input: both url and query is contradictory — silently
+    // dropping one is the worst option (caller gets unexpected results).
+    if (params.url && params.query) {
+      return toMcpError("Provide either 'url' or 'query', not both. Use 'url' for page/video extraction, 'query' for search.");
+    }
+
     // Route 1: YouTube -> transcript
     if (params.url && isYouTubeUrl(params.url)) {
+      // Transcript API supports text/json/markdown only — coerce unsupported
+      // formats (html/links) to text to avoid undefined backend behavior.
+      const transcriptFormat = ["text", "json", "markdown"].includes(params.format)
+        ? params.format
+        : "text";
       const result = await apiClient.postJson(YOUTUBE_TRANSCRIPT_API_PATH, {
         url: params.url,
-        format: params.format === "html" ? "text" : params.format,
+        format: transcriptFormat,
         timeout: 20,
       });
       if (!result.ok) return toMcpError(result.errorMessage);
@@ -133,13 +144,13 @@ async function callEngineApi(body) {
 function buildMetaSummary(meta) {
   if (!meta) return "";
   if (meta.type === "search" || meta.type === "google") {
-    return `\n\n---\nQuery: "${meta.query}" | Engine: ${meta.engine || "none"} | Results: ${meta.resultCount} | ${meta.elapsed}s`;
+    return `\n\n---\nQuery: "${meta.query || ""}" | Engine: ${meta.engine || "none"} | Results: ${meta.resultCount || 0} | ${meta.elapsed || 0}s`;
   }
   if (meta.type === "youtube_transcript") {
-    return `\n\n---\nVideo: ${meta.videoId} | Method: ${meta.method || "none"} | Segments: ${meta.segmentCount || 0} | ${meta.elapsed}s`;
+    return `\n\n---\nVideo: ${meta.videoId || "?"} | Method: ${meta.method || "none"} | Segments: ${meta.segmentCount || 0} | ${meta.elapsed || 0}s`;
   }
   if (meta.type === "page") {
-    return `\n\n---\nMeta: ${meta.textLength || 0} chars | ${meta.linksFound || 0} links | ${meta.elapsed}s`;
+    return `\n\n---\nMeta: ${meta.textLength || 0} chars | ${meta.linksFound || 0} links | ${meta.elapsed || 0}s`;
   }
   return "";
 }
@@ -282,8 +293,10 @@ server.tool(
 
     if (payload.isError) return payload;
 
+    // Use asText to handle structured link arrays (format:links returns a
+    // parsed array, not a string). Without this, an array renders as [object Object].
     return {
-      content: [{ type: "text", text: payload.output || "No links found." }],
+      content: [{ type: "text", text: asText(payload.output) || "No links found." }],
     };
   },
 );
@@ -312,6 +325,10 @@ server.tool(
         : payload.output;
     } catch (err) {
       return toMcpError(`Failed to parse metadata payload: ${err.message}`);
+    }
+    // Guard against missing/null output — prevents TypeError on field access.
+    if (!parsed || typeof parsed !== "object") {
+      return toMcpError("Engine returned no parseable metadata.");
     }
 
     const summaryLines = [

@@ -16,6 +16,7 @@
  */
 
 import { Defuddle } from "defuddle/node";
+import { logEvent } from "../observability/logging.js";
 
 /**
  * Extract main content + structured data from a rendered page.
@@ -82,8 +83,14 @@ export async function extractWithCascade(page, options = {}) {
         published: result.published || extractFromSchemaOrg(schemaOrg, "datePublished"),
       };
     }
-  } catch {
-    // defuddle failed (rare) — fall through to the cascade.
+  } catch (defuddleErr) {
+    // defuddle failed — log so operators can monitor extraction-quality
+    // regressions. Falling through to the cascade is correct behavior, but a
+    // silent failure here would hide a systemic defuddle issue.
+    logEvent("extractor.defuddle_failed", {
+      url,
+      error: defuddleErr.message?.substring(0, 200),
+    });
   }
 
   // Tier 2: semantic <article>/<main>/[role=main] extraction.

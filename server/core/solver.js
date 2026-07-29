@@ -75,7 +75,7 @@ export function isSolverEligible(kind) {
 async function extractSiteKey(page, kind) {
   const selectors = {
     cloudflare_turnstile: [".cf-turnstile[data-sitekey]", "iframe[src*='challenges.cloudflare.com']"],
-    cloudflare: [".cf-turnstile[data-sitekey]", "#cf-challenge"],
+    cloudflare: [".cf-turnstile[data-sitekey]", "iframe[src*='challenges.cloudflare.com']", "#cf-challenge"],
     hcaptcha: [".h-captcha[data-sitekey]", "iframe[src*='hcaptcha']"],
     recaptcha: [".g-recaptcha[data-sitekey]", "#recaptcha[data-sitekey]"],
   };
@@ -91,10 +91,16 @@ async function extractSiteKey(page, kind) {
       const match = src.match(/[?&]sitekey=([^&]+)/) || src.match(/captcha\.cloudflare\.com\/([a-f0-9x]+)/);
       if (match) return decodeURIComponent(match[1]);
     }
-    // Fallback: search the page HTML for a sitekey pattern.
+    // Broader fallback: search ALL script srcs + data attributes for the
+    // Cloudflare Turnstile sitekey pattern (0x4AAAAAAA...) and the generic
+    // data-sitekey attribute. Managed challenges inject the sitekey via JS,
+    // so it may not be on a widget element — search the full page source.
     const html = document.documentElement.outerHTML;
-    const m = html.match(/data-sitekey="([^"]+)"/);
-    return m ? m[1] : null;
+    // Cloudflare Turnstile sitekeys start with 0x followed by A's and alphanumerics.
+    const cfMatch = html.match(/(0x[0-9a-fA-F]{6,})/);
+    if (cfMatch) return cfMatch[1];
+    const genericMatch = html.match(/data-sitekey="([^"]+)"/);
+    return genericMatch ? genericMatch[1] : null;
   }, sel).catch(() => null);
 }
 

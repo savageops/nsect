@@ -172,6 +172,14 @@ export async function detectChallenge(page) {
   const textStripped = text.trim();
   const isTrulyEmpty = textStripped.length === 0;
   if (isTrulyEmpty) {
+    // Before declaring a block, check for legitimate zero-text pages: canvas/
+    // WebGL apps, PDF.js viewers, maps, image-only pages, and framesets all
+    // have empty innerText but are real content, not bot-detection interstitials.
+    const hasVisualContent = markerHits.some((m) =>
+      m.includes("canvas") || m.includes("video") || m.includes("iframe") || m.includes("img") || m.includes("embed"),
+    );
+    if (hasVisualContent) return null;
+
     let title = "";
     try {
       title = await page.title();
@@ -290,7 +298,11 @@ export async function detectInfiniteScroll(page) {
       );
       if (sentinels.length > 0) return true;
       // IntersectionObserver-based lazy loaders are a strong SPA-feed signal.
-      const feed = document.querySelector("[class*='feed'], [class*='Feed'], main");
+      // NOTE: `main` was removed from this selector — it's present on nearly
+      // every modern semantic page, so `main + tall page` false-positived on
+      // long articles. Real infinite-scroll feeds use class names containing
+      // "feed"/"Feed" (React/Vue feed components) plus height, not bare <main>.
+      const feed = document.querySelector("[class*='feed'], [class*='Feed']");
       return Boolean(feed) && document.documentElement.scrollHeight > window.innerHeight * 3;
     });
   } catch {
