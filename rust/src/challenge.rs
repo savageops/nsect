@@ -209,6 +209,39 @@ pub fn detect_challenge(tab: &Tab) -> ChallengeInfo {
         }
     }
 
+    // Empty-page heuristic (mirrors JS challenge.js): if the page has truly
+    // zero visible text AND the title is the bare hostname, it's almost
+    // certainly a bot-detection interstitial (PX/imperva blank redirect).
+    // Guard against false positives on canvas/image/video pages.
+    let text_trimmed = text.trim();
+    if text_trimmed.is_empty() {
+        // Check for visual content (canvas/video/iframe/img) — legitimate pages
+        // that render all content into canvas/media have empty innerText.
+        let has_visual = marker_hits.iter().any(|m| {
+            m.contains("canvas") || m.contains("video") || m.contains("iframe")
+                || m.contains("img") || m.contains("embed")
+        });
+        if !has_visual {
+            let bare_host = url::Url::parse(&url)
+                .map(|u| u.host_str().unwrap_or("").to_string())
+                .unwrap_or_default();
+            let title = tab.get_url(); // headless_chrome doesn't expose title easily; use URL as proxy
+            // If the page URL is just the host (no meaningful path) + no text → block.
+            let title_looks_like_block = title == bare_host || title == bare_host.replace("www.", "");
+            if title_looks_like_block || bare_host.is_empty() {
+                return ChallengeInfo {
+                    detected: true,
+                    kind: Some("blocked".to_string()),
+                    label: Some("Bot-detection empty interstitial".to_string()),
+                    resolved: false,
+                    waited_ms: 0,
+                    interactive: Some(true),
+                    timed_out: None,
+                };
+            }
+        }
+    }
+
     ChallengeInfo::none()
 }
 

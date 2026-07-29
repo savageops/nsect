@@ -16,6 +16,8 @@ pub struct PageContent {
     pub html: String,
     pub links: Vec<DiscoveredLink>,
     pub meta: BTreeMap<String, String>,
+    #[serde(default)]
+    pub schema_org: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

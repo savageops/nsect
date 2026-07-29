@@ -11,6 +11,7 @@ pub mod observability;
 pub mod request;
 pub mod routes;
 pub mod search;
+pub mod solver;
 pub mod transcript;
 
 use std::sync::Arc;

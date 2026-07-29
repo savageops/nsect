@@ -185,7 +185,25 @@ fn run_nsect_engine_blocking(params: NormalizedEngineRequest) -> EngineResponse 
             close_tab_session(&tab);
             Ok(response)
         } else {
-            let page = run_page_extraction(&tab, &params)?;
+            let (page, _challenge_info) = match run_page_extraction(&tab, &params) {
+                Ok(result) => result,
+                Err(e) => {
+                    let msg = e.to_string();
+                    let (error_code, error_msg) = if msg.starts_with("CHALLENGE_BLOCKED") {
+                        ("CHALLENGE_BLOCKED", msg.trim_start_matches("CHALLENGE_BLOCKED: "))
+                    } else {
+                        ("UPSTREAM_REQUEST", msg.as_str())
+                    };
+                    return Ok(EngineResponse {
+                        success: false,
+                        output: None,
+                        format: None,
+                        meta: None,
+                        error_code: Some(error_code.to_string()),
+                        error: Some(error_msg.to_string()),
+                    });
+                }
+            };
             let artifacts = persist_artifacts(&tab, &params)?;
             let response = EngineResponse {
                 success: true,
@@ -316,7 +334,7 @@ fn prime_tab(
     Ok(())
 }
 
-fn run_page_extraction(tab: &Tab, params: &NormalizedEngineRequest) -> Result<PageContent> {
+fn run_page_extraction(tab: &Tab, params: &NormalizedEngineRequest) -> Result<(PageContent, crate::challenge::ChallengeInfo)> {
     let target_url = params
         .url
         .as_deref()
@@ -326,8 +344,34 @@ fn run_page_extraction(tab: &Tab, params: &NormalizedEngineRequest) -> Result<Pa
         .with_context(|| format!("failed to navigate to {target_url}"))?;
     tab.wait_until_navigated()
         .context("page did not finish navigation")?;
-    let _challenge_info = apply_strategy(tab, params)?;
-    extract_page_content(tab, params.verbose)
+    let challenge_info = apply_strategy(tab, params)?;
+
+    // If a challenge was detected and not resolved, try the solver if configured.
+    if challenge_info.detected && !challenge_info.resolved {
+        // Solver would go here — requires solver config threaded through params.
+        // For now, return an honest error matching the JS CHALLENGE_BLOCKED path.
+        return Err(anyhow!(
+            "CHALLENGE_BLOCKED: Challenge from {} detected but not resolved",
+            challenge_info.label.as_deref().unwrap_or("unknown")
+        ));
+    }
+
+    let content = extract_page_content(tab, params.verbose)?;
+
+    // Empty-content guard: if extraction yielded near-zero text, the page may
+    // be a bot-detection interstitial the challenge probe missed. Check for
+    // visual content (canvas/img/iframe) before declaring it a block.
+    if !params.verbose && content.text.trim().len() < 50 {
+        let late_challenge = crate::challenge::detect_challenge(tab);
+        if late_challenge.detected {
+            return Err(anyhow!(
+                "CHALLENGE_BLOCKED: Challenge from {} detected (empty-content interstitial)",
+                late_challenge.label.as_deref().unwrap_or("unknown")
+            ));
+        }
+    }
+
+    Ok((content, challenge_info))
 }
 
 fn run_search_with_fallback(tab: &Tab, params: &NormalizedEngineRequest) -> Result<SearchState> {
@@ -491,7 +535,7 @@ fn has_substantive_content(tab: &Tab) -> bool {
 }
 
 fn detect_infinite_scroll(tab: &Tab) -> bool {
-    let js = "(() => { const s = document.querySelectorAll(\"[data-pagination], [data-load-more], [data-infinite-scroll], .infinite-scroll, .load-more, #load-more, [role='feed']\"); if (s.length > 0) return true; const feed = document.querySelector(\"[class*='feed'], [class*='Feed'], main\"); return Boolean(feed) && document.documentElement.scrollHeight > window.innerHeight * 3; })()";
+    let js = "(() => { const s = document.querySelectorAll(\"[data-pagination], [data-load-more], [data-infinite-scroll], .infinite-scroll, .load-more, #load-more, [role='feed']\"); if (s.length > 0) return true; const feed = document.querySelector(\"[class*='feed'], [class*='Feed']\"); return Boolean(feed) && document.documentElement.scrollHeight > window.innerHeight * 3; })()";
     match tab.evaluate(js, true) {
         Ok(remote) => remote.value.and_then(|val| val.as_bool()).unwrap_or(false),
         Err(_) => false,
@@ -525,23 +569,49 @@ fn persist_artifacts(tab: &Tab, params: &NormalizedEngineRequest) -> Result<Arti
 
 fn extract_page_content(tab: &Tab, verbose: bool) -> Result<PageContent> {
     let noise = serde_json::to_string(NOISE_SELECTORS).expect("noise selectors should serialize");
+    // Mirrors the JS extraction cascade: try semantic <article>/<main> first,
+    // fall back to full-page noise-strip. Also extracts JSON-LD structured
+    // data (schema.org) in the same atomic DOM read. Defuddle (the JS tier-1
+    // extractor) is a Node library that can't be ported — but the semantic +
+    // fallback tiers give comparable quality on most pages.
     let script = format!(
         "(function() {{
             const isVerbose = {};
             const noiseSels = {};
-            const clone = document.cloneNode(true);
-            if (!isVerbose) {{
-                for (const sel of noiseSels) {{
-                    clone.querySelectorAll(sel).forEach((el) => el.remove());
-                }}
-            }}
             const title = document.title || '';
             const url = window.location.href || '';
-            const html = clone.documentElement ? clone.documentElement.outerHTML : document.documentElement.outerHTML;
-            const body = clone.body || clone.documentElement;
-            const text = ((body && (body.innerText || body.textContent)) || '')
-                .replace(/\\n{{3,}}/g, '\\n\\n')
-                .trim();
+
+            // Tier 1: semantic content container (article/main/[role=main]).
+            const container = document.querySelector('article, main, [role=\\'main\\'], #content, .content, .post, .article');
+            let text = '';
+            let html = '';
+            if (container) {{
+                const clone = container.cloneNode(true);
+                if (!isVerbose) {{
+                    for (const sel of noiseSels) {{
+                        clone.querySelectorAll(sel).forEach((el) => el.remove());
+                    }}
+                }}
+                text = ((clone.innerText || clone.textContent) || '').replace(/\\n{{3,}}/g, '\\n\\n').trim();
+                html = clone.innerHTML;
+            }}
+            // Tier 2: full-page noise-strip fallback (or verbose mode).
+            if (text.length < 50 || isVerbose) {{
+                const fullClone = document.cloneNode(true);
+                if (!isVerbose) {{
+                    for (const sel of noiseSels) {{
+                        fullClone.querySelectorAll(sel).forEach((el) => el.remove());
+                    }}
+                }}
+                const body = fullClone.body || fullClone.documentElement;
+                const fullText = ((body && (body.innerText || body.textContent)) || '')
+                    .replace(/\\n{{3,}}/g, '\\n\\n').trim();
+                if (fullText.length > text.length) {{
+                    text = fullText;
+                    html = fullClone.documentElement ? fullClone.documentElement.outerHTML : document.documentElement.outerHTML;
+                }}
+            }}
+
             const links = Array.from(document.querySelectorAll('a[href]'))
                 .map((anchor) => ({{
                     text: (anchor.textContent || '').trim().substring(0, 200),
@@ -556,7 +626,11 @@ fn extract_page_content(tab: &Tab, verbose: bool) -> Result<PageContent> {
                     meta[key] = value;
                 }}
             }});
-            return JSON.stringify({{ title, url, text, html, links, meta }});
+            // JSON-LD (schema.org structured data) — author, datePublished, etc.
+            const schemaOrg = Array.from(document.querySelectorAll('script[type=\"application/ld+json\"]'))
+                .map((s) => {{ try {{ return JSON.parse(s.textContent); }} catch {{ return null; }} }})
+                .filter((x) => x !== null);
+            return JSON.stringify({{ title, url, text, html, links, meta, schemaOrg }});
         }})()",
         if verbose { "true" } else { "false" },
         noise
