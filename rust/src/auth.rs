@@ -161,3 +161,163 @@ pub fn admin_rate_limit_allows(ip: &str) -> bool {
 pub fn reset_admin_rate_limit_for_tests() {
     ADMIN_WINDOWS.lock().expect("admin rate limit mutex poisoned").clear();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderMap;
+
+    fn make_headers(key: &str, value: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        // HeaderMap requires 'static keys — use unwrap_or_default for safety
+        if let Ok(name) = axum::http::HeaderName::from_bytes(key.as_bytes()) {
+            h.insert(name, value.parse().unwrap());
+        }
+        h
+    }
+
+    // --- read_api_key ---
+
+    #[test]
+    fn read_api_key_from_x_api_key() {
+        let h = make_headers("x-api-key", "sk_test123");
+        assert_eq!(read_api_key(&h), Some("sk_test123".to_string()));
+    }
+
+    #[test]
+    fn read_api_key_from_bearer() {
+        let h = make_headers("authorization", "Bearer sk_from_bearer");
+        assert_eq!(read_api_key(&h), Some("sk_from_bearer".to_string()));
+    }
+
+    #[test]
+    fn read_api_key_lowercase_bearer() {
+        let h = make_headers("authorization", "bearer sk_lower");
+        assert_eq!(read_api_key(&h), Some("sk_lower".to_string()));
+    }
+
+    #[test]
+    fn read_api_key_returns_none_when_missing() {
+        let h = HeaderMap::new();
+        assert_eq!(read_api_key(&h), None);
+    }
+
+    #[test]
+    fn read_api_key_returns_none_for_empty_bearer() {
+        let h = make_headers("authorization", "Bearer ");
+        assert_eq!(read_api_key(&h), None);
+    }
+
+    #[test]
+    fn read_api_key_returns_none_for_non_bearer_auth() {
+        let h = make_headers("authorization", "Basic dXNlcjpwYXNz");
+        assert_eq!(read_api_key(&h), None);
+    }
+
+    // --- read_admin_key ---
+
+    #[test]
+    fn read_admin_key_from_x_admin_key() {
+        let h = make_headers("x-admin-key", "admin-secret");
+        assert_eq!(read_admin_key(&h), Some("admin-secret".to_string()));
+    }
+
+    #[test]
+    fn read_admin_key_returns_none_when_missing() {
+        let h = HeaderMap::new();
+        assert_eq!(read_admin_key(&h), None);
+    }
+
+    #[test]
+    fn read_admin_key_does_not_read_bearer() {
+        let h = make_headers("authorization", "Bearer admin-secret");
+        assert_eq!(read_admin_key(&h), None);
+    }
+
+    #[test]
+    fn read_admin_key_returns_none_for_empty() {
+        let h = make_headers("x-admin-key", "");
+        assert_eq!(read_admin_key(&h), None);
+    }
+
+    #[test]
+    fn read_admin_key_trims_whitespace() {
+        let h = make_headers("x-admin-key", "  trimmed-key  ");
+        assert_eq!(read_admin_key(&h), Some("trimmed-key".to_string()));
+    }
+
+    // --- safe_compare_secret (via db module) ---
+
+    #[test]
+    fn safe_compare_secret_matches() {
+        assert!(crate::db::safe_compare_secret("secret", "secret"));
+    }
+
+    #[test]
+    fn safe_compare_secret_mismatch() {
+        assert!(!crate::db::safe_compare_secret("secret", "wrong"));
+    }
+
+    #[test]
+    fn safe_compare_secret_empty_inputs() {
+        assert!(!crate::db::safe_compare_secret("", "secret"));
+        assert!(!crate::db::safe_compare_secret("secret", ""));
+        assert!(crate::db::safe_compare_secret("", ""));
+    }
+
+    // --- admin_rate_limit_allows ---
+
+    #[test]
+    fn rate_limit_allows_up_to_max() {
+        reset_admin_rate_limit_for_tests();
+        for _ in 0..10 {
+            assert!(admin_rate_limit_allows("1.2.3.4"));
+        }
+    }
+
+    #[test]
+    fn rate_limit_blocks_after_max() {
+        reset_admin_rate_limit_for_tests();
+        for _ in 0..10 {
+            admin_rate_limit_allows("5.6.7.8");
+        }
+        assert!(!admin_rate_limit_allows("5.6.7.8"));
+    }
+
+    #[test]
+    fn rate_limit_tracks_ips_independently() {
+        reset_admin_rate_limit_for_tests();
+        for _ in 0..10 {
+            admin_rate_limit_allows("10.0.0.1");
+        }
+        // IP B is unaffected
+        assert!(admin_rate_limit_allows("10.0.0.2"));
+    }
+
+    #[test]
+    fn rate_limit_handles_ipv6() {
+        reset_admin_rate_limit_for_tests();
+        for _ in 0..10 {
+            admin_rate_limit_allows("::1");
+        }
+        assert!(!admin_rate_limit_allows("::1"));
+        // IPv4 is separate
+        assert!(admin_rate_limit_allows("127.0.0.1"));
+    }
+
+    #[test]
+    fn rate_limit_handles_unknown_ip() {
+        reset_admin_rate_limit_for_tests();
+        assert!(admin_rate_limit_allows("unknown"));
+    }
+
+    // --- is_solver_eligible parity ---
+
+    #[test]
+    fn solver_eligible_kinds() {
+        assert!(crate::solver::is_solver_eligible("cloudflare_turnstile"));
+        assert!(crate::solver::is_solver_eligible("hcaptcha"));
+        assert!(!crate::solver::is_solver_eligible("perimeterx"));
+        assert!(!crate::solver::is_solver_eligible("blocked"));
+    }
+}
