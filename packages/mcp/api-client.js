@@ -71,11 +71,22 @@ export function createApiClient({
       responseText = await response.text();
     } catch (err) {
       const isAbort = err?.name === "AbortError";
+      // Use String() fallback for non-Error throws (e.g., string/null rejections
+      // in network partition scenarios). Node 18+ fetch wraps underlying errors
+      // like ECONNREFUSED in .cause with a generic "fetch failed" message —
+      // prefer the more specific cause when available.
+      const rawMessage = err?.message;
+      const isGenericFetchFailed = rawMessage === "fetch failed" || rawMessage === "Failed to fetch";
+      const detail = (isGenericFetchFailed && err?.cause?.message)
+        || rawMessage
+        || err?.cause?.message
+        || err?.code
+        || String(err);
       return {
         ok: false,
         errorMessage: isAbort
           ? `API request timed out after ${Math.floor(timeoutMs / 1000)}s`
-          : `API request failed: ${err.message}`,
+          : `API request failed: ${detail}`,
       };
     } finally {
       clearTimeout(timeoutId);

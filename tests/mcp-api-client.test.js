@@ -121,4 +121,48 @@ describe("packages/mcp/api-client", () => {
     expect(result.ok).toBe(true);
     expect(capturedHeaders).not.toHaveProperty("x-api-key");
   });
+
+  it("handles non-Error throws gracefully (string rejection)", async () => {
+    const client = createApiClient({
+      apiBase: "http://localhost:3000",
+      apiKey: "sk_test",
+      fetchImpl: async () => {
+        throw "network exploded"; // non-Error throw
+      },
+    });
+
+    const result = await client.postJson(ENGINE_API_PATH, {});
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toContain("network exploded");
+  });
+
+  it("handles null rejection gracefully", async () => {
+    const client = createApiClient({
+      apiBase: "http://localhost:3000",
+      apiKey: "sk_test",
+      fetchImpl: async () => {
+        throw null;
+      },
+    });
+
+    const result = await client.postJson(ENGINE_API_PATH, {});
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).not.toContain("undefined");
+  });
+
+  it("surfaces err.cause for wrapped network errors (Node 18+ fetch)", async () => {
+    const client = createApiClient({
+      apiBase: "http://localhost:3000",
+      apiKey: "sk_test",
+      fetchImpl: async () => {
+        const err = new TypeError("fetch failed");
+        err.cause = new Error("connect ECONNREFUSED 127.0.0.1:3000");
+        throw err;
+      },
+    });
+
+    const result = await client.postJson(ENGINE_API_PATH, {});
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toContain("ECONNREFUSED");
+  });
 });
