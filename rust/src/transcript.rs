@@ -1578,4 +1578,215 @@ mod tests {
         assert_eq!(parse_vtt_transcript(vtt).len(), 2);
         assert_eq!(parse_srt_transcript(srt).len(), 2);
     }
+
+    #[test]
+    fn parse_youtube_id_from_various_url_formats() {
+        assert_eq!(
+            parse_youtube_video_id(Some("dQw4w9WgXcQ")),
+            Some("dQw4w9WgXcQ".to_string())
+        );
+        assert_eq!(
+            parse_youtube_video_id(Some("https://www.youtube.com/watch?v=dQw4w9WgXcQ")),
+            Some("dQw4w9WgXcQ".to_string())
+        );
+        assert_eq!(
+            parse_youtube_video_id(Some("https://youtu.be/dQw4w9WgXcQ")),
+            Some("dQw4w9WgXcQ".to_string())
+        );
+        assert_eq!(
+            parse_youtube_video_id(Some("https://www.youtube.com/embed/dQw4w9WgXcQ")),
+            Some("dQw4w9WgXcQ".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_youtube_id_rejects_invalid_input() {
+        assert_eq!(parse_youtube_video_id(None), None);
+        assert_eq!(parse_youtube_video_id(Some("")), None);
+        assert_eq!(parse_youtube_video_id(Some("   ")), None);
+        assert_eq!(parse_youtube_video_id(Some("too_short")), None);
+        assert_eq!(parse_youtube_video_id(Some("https://example.com")), None);
+    }
+
+    #[test]
+    fn pick_track_prefers_exact_manual_match() {
+        let tracks = vec![
+            Track {
+                language_code: "en".to_string(),
+                url: "https://example.com/en-auto".to_string(),
+                is_auto_generated: true,
+            },
+            Track {
+                language_code: "en".to_string(),
+                url: "https://example.com/en-manual".to_string(),
+                is_auto_generated: false,
+            },
+        ];
+        let selected = pick_track(tracks, "en", true).unwrap();
+        assert!(!selected.is_auto_generated);
+        assert_eq!(selected.url, "https://example.com/en-manual");
+    }
+
+    #[test]
+    fn pick_track_falls_back_to_auto_when_no_manual() {
+        let tracks = vec![Track {
+            language_code: "en".to_string(),
+            url: "https://example.com/en-auto".to_string(),
+            is_auto_generated: true,
+        }];
+        let selected = pick_track(tracks, "en", true).unwrap();
+        assert!(selected.is_auto_generated);
+    }
+
+    #[test]
+    fn pick_track_excludes_auto_when_flag_false() {
+        let tracks = vec![
+            Track {
+                language_code: "en".to_string(),
+                url: "https://example.com/auto".to_string(),
+                is_auto_generated: true,
+            },
+            Track {
+                language_code: "fr".to_string(),
+                url: "https://example.com/fr".to_string(),
+                is_auto_generated: false,
+            },
+        ];
+        // Requesting "en" but auto excluded → falls to first non-auto (fr)
+        let selected = pick_track(tracks, "en", false).unwrap();
+        assert_eq!(selected.language_code, "fr");
+    }
+
+    #[test]
+    fn pick_track_matches_base_language() {
+        let tracks = vec![Track {
+            language_code: "en-US".to_string(),
+            url: "https://example.com/en-us".to_string(),
+            is_auto_generated: false,
+        }];
+        // Requesting "en" should match "en-US" via base-language fallback
+        let selected = pick_track(tracks, "en", false).unwrap();
+        assert_eq!(selected.language_code, "en-US");
+    }
+
+    #[test]
+    fn pick_track_returns_none_for_empty_tracks() {
+        assert!(pick_track(Vec::new(), "en", true).is_none());
+    }
+
+    #[test]
+    fn pick_track_returns_none_when_all_urls_empty() {
+        let tracks = vec![Track {
+            language_code: "en".to_string(),
+            url: "   ".to_string(),
+            is_auto_generated: false,
+        }];
+        assert!(pick_track(tracks, "en", false).is_none());
+    }
+
+    #[test]
+    fn build_caption_urls_prefers_json3() {
+        let urls = build_caption_fetch_urls("https://example.com/caption");
+        assert_eq!(urls.len(), 2);
+        assert!(urls[0].contains("fmt=json3"));
+        assert_eq!(urls[1], "https://example.com/caption");
+    }
+
+    #[test]
+    fn build_caption_urls_preserves_existing_fmt() {
+        let urls = build_caption_fetch_urls("https://example.com/caption?fmt=srv3");
+        assert_eq!(urls.len(), 1);
+        assert_eq!(urls[0], "https://example.com/caption?fmt=srv3");
+    }
+
+    #[test]
+    fn build_caption_urls_uses_ampersand_for_existing_query() {
+        let urls = build_caption_fetch_urls("https://example.com/caption?hl=en");
+        assert!(urls[0].contains("&fmt=json3"));
+    }
+
+    #[test]
+    fn resolve_absolute_url_passthrough_for_absolute() {
+        let result = resolve_absolute_url("https://instance.com", "https://other.com/path");
+        assert_eq!(result, Some("https://other.com/path".to_string()));
+    }
+
+    #[test]
+    fn resolve_absolute_url_joins_relative() {
+        let result = resolve_absolute_url("https://instance.com", "/api/captions/123");
+        assert_eq!(result, Some("https://instance.com/api/captions/123".to_string()));
+    }
+
+    #[test]
+    fn resolve_absolute_url_returns_none_for_invalid_both() {
+        let result = resolve_absolute_url("not-a-url", "also-not-a-url");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn map_external_tracks_handles_array_payload() {
+        let payload = serde_json::json!([
+            { "languageCode": "en", "url": "https://example.com/en" }
+        ]);
+        let tracks = map_external_tracks(&payload);
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].language_code, "en");
+    }
+
+    #[test]
+    fn map_external_tracks_handles_captions_key() {
+        let payload = serde_json::json!({
+            "captions": [{ "languageCode": "fr", "url": "https://example.com/fr" }]
+        });
+        let tracks = map_external_tracks(&payload);
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].language_code, "fr");
+    }
+
+    #[test]
+    fn map_external_tracks_handles_subtitles_key() {
+        let payload = serde_json::json!({
+            "subtitles": [{ "languageCode": "de", "url": "https://example.com/de" }]
+        });
+        let tracks = map_external_tracks(&payload);
+        assert_eq!(tracks.len(), 1);
+    }
+
+    #[test]
+    fn map_external_tracks_handles_single_object() {
+        let payload = serde_json::json!({ "url": "https://example.com/single" });
+        let tracks = map_external_tracks(&payload);
+        assert_eq!(tracks.len(), 1);
+    }
+
+    #[test]
+    fn map_external_tracks_returns_empty_for_null() {
+        let tracks = map_external_tracks(&serde_json::Value::Null);
+        assert!(tracks.is_empty());
+    }
+
+    #[test]
+    fn collect_ytdlp_tracks_separates_manual_and_auto() {
+        let payload = serde_json::json!({
+            "subtitles": {
+                "en": [{ "url": "https://example.com/en-manual", "name": "English" }]
+            },
+            "automatic_captions": {
+                "en": [{ "url": "https://example.com/en-auto", "name": "English (auto)" }]
+            }
+        });
+        let tracks = collect_ytdlp_tracks(&payload);
+        assert_eq!(tracks.len(), 2);
+        let manual = tracks.iter().find(|t| !t.is_auto_generated);
+        let auto = tracks.iter().find(|t| t.is_auto_generated);
+        assert!(manual.is_some());
+        assert!(auto.is_some());
+    }
+
+    #[test]
+    fn collect_ytdlp_tracks_handles_empty_payload() {
+        let payload = serde_json::json!({});
+        let tracks = collect_ytdlp_tracks(&payload);
+        assert!(tracks.is_empty());
+    }
 }
