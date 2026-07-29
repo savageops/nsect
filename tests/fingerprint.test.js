@@ -181,3 +181,51 @@ describe("generateFingerprint()", () => {
     expect(fps.size).toBeGreaterThan(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Locale ↔ timezone geographic coherence (anti-bot ML probes this)
+// ---------------------------------------------------------------------------
+
+describe("locale-timezone coherence", () => {
+  // Run many iterations to catch statistical incoherence.
+  it("en-AU locale never gets a non-AU timezone", () => {
+    for (let i = 0; i < 100; i++) {
+      const fp = generateFingerprint();
+      if (fp.locale === "en-AU") {
+        expect(fp.timezone).toBe("Australia/Sydney");
+      }
+    }
+  });
+
+  it("en-GB locale never gets a US timezone", () => {
+    for (let i = 0; i < 100; i++) {
+      const fp = generateFingerprint();
+      if (fp.locale === "en-GB") {
+        expect(fp.timezone).toBe("Europe/London");
+        expect(fp.timezone).not.toContain("America");
+      }
+    }
+  });
+
+  it("en-NZ locale always gets Pacific/Auckland", () => {
+    for (let i = 0; i < 100; i++) {
+      const fp = generateFingerprint();
+      if (fp.locale === "en-NZ") {
+        expect(fp.timezone).toBe("Pacific/Auckland");
+      }
+    }
+  });
+
+  it("en-US locale gets a US timezone", () => {
+    let foundUs = false;
+    for (let i = 0; i < 200; i++) {
+      const fp = generateFingerprint();
+      if (fp.locale === "en-US") {
+        foundUs = true;
+        expect(fp.timezone.startsWith("America/")).toBe(true);
+      }
+    }
+    // en-US should appear at least once in 200 iterations
+    expect(foundUs).toBe(true);
+  });
+});

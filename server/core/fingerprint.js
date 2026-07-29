@@ -95,11 +95,29 @@ const WEBGL_PROFILES = {
   ],
 };
 
+/**
+ * Map a locale to geographically consistent timezones. Anti-bot ML models
+ * check that the timezone matches the locale's country — e.g. an en-AU
+ * locale with America/New_York timezone is an immediate red flag.
+ * Each locale maps to 1+ plausible timezones from the TIMEZONES list.
+ */
+const LOCALE_TIMEZONES = {
+  "en-US": ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles"],
+  "en-CA": ["America/Toronto", "America/Vancouver"],
+  "en-GB": ["Europe/London"],
+  "en-IE": ["Europe/Dublin"],
+  "en-AU": ["Australia/Sydney"],
+  "en-NZ": ["Pacific/Auckland"],
+  "en-ZA": ["Europe/London"], // ZA users often have UK-configured English; no ZA tz in list
+};
+
 export function generateFingerprint() {
   const ua = pick(USER_AGENTS);
   const vp = pick(VIEWPORTS);
   const locale = pick(LOCALES);
-  const tz = pick(TIMEZONES);
+  // Pick a timezone geographically consistent with the locale — prevents
+  // impossible combos like en-AU + America/New_York that anti-bots detect.
+  const tz = pick(LOCALE_TIMEZONES[locale] || TIMEZONES);
   const platform = ua.includes("Windows") ? "Win32"
     : ua.includes("Mac") ? "MacIntel"
     : ua.includes("Linux") ? "Linux x86_64"

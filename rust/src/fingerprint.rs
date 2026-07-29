@@ -167,11 +167,30 @@ pub struct FingerprintProfile {
     pub screen_avail_height: u32,
 }
 
+/// Map a locale to geographically consistent timezones. Anti-bot ML models
+/// check that the timezone matches the locale's country.
+fn locale_timezones(locale: &str) -> &'static [&'static str] {
+    match locale {
+        "en-US" => &["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles"],
+        "en-CA" => &["America/Toronto", "America/Vancouver"],
+        "en-GB" => &["Europe/London"],
+        "en-IE" => &["Europe/Dublin"],
+        "en-AU" => &["Australia/Sydney"],
+        "en-NZ" => &["Pacific/Auckland"],
+        // ZA users often have UK-configured English; no ZA tz in the list
+        "en-ZA" => &["Europe/London"],
+        _ => TIMEZONES,
+    }
+}
+
 pub fn generate_fingerprint() -> FingerprintProfile {
     let user_agent = pick_str(USER_AGENTS);
     let (width, height) = pick_tuple(VIEWPORTS);
     let locale = pick_str(LOCALES);
-    let timezone = pick_str(TIMEZONES);
+    // Pick a timezone geographically consistent with the locale.
+    let compatible_tzs = locale_timezones(&locale);
+    let tz_idx = rand::rng().random_range(0..compatible_tzs.len());
+    let timezone = compatible_tzs[tz_idx].to_string();
     let platform = if user_agent.contains("Windows") {
         "Win32".to_string()
     } else if user_agent.contains("Mac") {
@@ -235,4 +254,83 @@ fn pick_num(values: &[u32]) -> u32 {
 fn pick_tuple(values: &[(u32, u32)]) -> (u32, u32) {
     let index = rand::rng().random_range(0..values.len());
     values[index]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn platform_matches_user_agent_os() {
+        for _ in 0..50 {
+            let fp = generate_fingerprint();
+            if fp.user_agent.contains("Windows") {
+                assert_eq!(fp.platform, "Win32");
+            } else if fp.user_agent.contains("Mac") {
+                assert_eq!(fp.platform, "MacIntel");
+            } else if fp.user_agent.contains("Linux") {
+                assert_eq!(fp.platform, "Linux x86_64");
+            }
+        }
+    }
+
+    #[test]
+    fn webgl_vendor_matches_platform() {
+        for _ in 0..50 {
+            let fp = generate_fingerprint();
+            if fp.platform == "MacIntel" {
+                // Mac uses Apple GPU or Intel Iris — never NVIDIA/AMD Direct3D11
+                assert!(
+                    fp.webgl_renderer.contains("Apple") || fp.webgl_renderer.contains("Intel"),
+                    "Mac WebGL renderer should be Apple or Intel, got: {}",
+                    fp.webgl_renderer
+                );
+            }
+            if fp.platform == "Win32" {
+                // Windows uses Direct3D11 ANGLE — never "Apple GPU"
+                assert!(
+                    fp.webgl_renderer.contains("Direct3D11"),
+                    "Windows WebGL renderer should use Direct3D11, got: {}",
+                    fp.webgl_renderer
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn locale_timezone_coherence_en_au() {
+        for _ in 0..100 {
+            let fp = generate_fingerprint();
+            if fp.locale == "en-AU" {
+                assert_eq!(fp.timezone, "Australia/Sydney");
+            }
+        }
+    }
+
+    #[test]
+    fn locale_timezone_coherence_en_gb() {
+        for _ in 0..100 {
+            let fp = generate_fingerprint();
+            if fp.locale == "en-GB" {
+                assert_eq!(fp.timezone, "Europe/London");
+            }
+        }
+    }
+
+    #[test]
+    fn locale_timezone_coherence_en_us() {
+        let mut found_us = false;
+        for _ in 0..200 {
+            let fp = generate_fingerprint();
+            if fp.locale == "en-US" {
+                found_us = true;
+                assert!(
+                    fp.timezone.starts_with("America/"),
+                    "en-US timezone should be American, got: {}",
+                    fp.timezone
+                );
+            }
+        }
+        assert!(found_us, "en-US should appear in 200 iterations");
+    }
 }
