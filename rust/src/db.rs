@@ -350,10 +350,18 @@ impl KeyStore {
             })?;
 
         if !record.active {
+            // Distinguish lazy-deactivated-by-expiry from explicitly revoked.
+            // A key that expired while idle has expired_at set; one that was
+            // explicitly revoked has revoked_at set. Return the correct reason.
+            let (code, msg) = if record.expired_at.is_some() {
+                ("expired", "API key has expired.")
+            } else {
+                ("revoked", "API key has been revoked.")
+            };
             return Err(ValidationFailure {
                 status: 403,
-                error: "API key has been revoked.".to_string(),
-                code: "revoked".to_string(),
+                error: msg.to_string(),
+                code: code.to_string(),
                 retry_after: None,
                 cooldown_seconds: None,
             });

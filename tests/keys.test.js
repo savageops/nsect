@@ -117,6 +117,23 @@ describe("server/db/keys.js", () => {
     expect(result.reason).toBe("expired");
   });
 
+  it("returns 'expired' consistently on subsequent calls (not 'revoked')", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const { apiKey } = createKey("expiring-consistency", 100, 1);
+    vi.advanceTimersByTime(1_100);
+
+    // First call: expiry detected, key lazily deactivated
+    const first = validateKey(apiKey);
+    expect(first.valid).toBe(false);
+    expect(first.reason).toBe("expired");
+
+    // Second call: key is now active=0, but should still say 'expired' not 'revoked'
+    const second = validateKey(apiKey);
+    expect(second.valid).toBe(false);
+    expect(second.reason).toBe("expired");
+  });
+
   it("increments useCount and sets lastUsed on valid validation", () => {
     const { apiKey } = createKey("counter");
     validateKey(apiKey);

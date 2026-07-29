@@ -242,7 +242,13 @@ export function validateKey(apiKey, { enforceSearchCooldown = false } = {}) {
 
     const row = selectStmt.get(keyHash);
     if (!row) return { valid: false, reason: "not_found" };
-    if (row.active !== 1) return { valid: false, reason: "revoked" };
+    if (row.active !== 1) {
+      // Distinguish lazy-deactivated-by-expiry from explicitly revoked.
+      // Without this, a key that expired while idle returns "expired" on the
+      // first call (when the expiry check fires) but "revoked" on every
+      // subsequent call (because active=0) — inconsistent error semantics.
+      return { valid: false, reason: row.expired_at ? "expired" : "revoked" };
+    }
 
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
