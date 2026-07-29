@@ -1011,4 +1011,161 @@ mod tests {
         assert_eq!(normalized.len(), 1);
         assert_eq!(normalized[0].url, "https://example.com");
     }
+
+    #[test]
+    fn normalize_handles_empty_results() {
+        let normalized = normalize_search_results("google", vec![], 10);
+        assert!(normalized.is_empty());
+    }
+
+    #[test]
+    fn normalize_skips_non_http_urls() {
+        let normalized = normalize_search_results(
+            "google",
+            vec![
+                RawSearchResult {
+                    title: Some("FTP".to_string()),
+                    url: Some("ftp://example.com".to_string()),
+                    snippet: None,
+                },
+                RawSearchResult {
+                    title: Some("Relative".to_string()),
+                    url: Some("/relative/path".to_string()),
+                    snippet: None,
+                },
+                RawSearchResult {
+                    title: Some("Valid".to_string()),
+                    url: Some("https://valid.com".to_string()),
+                    snippet: None,
+                },
+            ],
+            10,
+        );
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(normalized[0].url, "https://valid.com");
+    }
+
+    #[test]
+    fn normalize_skips_null_url_and_title() {
+        let normalized = normalize_search_results(
+            "google",
+            vec![
+                RawSearchResult {
+                    title: None,
+                    url: None,
+                    snippet: None,
+                },
+                RawSearchResult {
+                    title: Some("Valid".to_string()),
+                    url: Some("https://example.com".to_string()),
+                    snippet: None,
+                },
+            ],
+            10,
+        );
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(normalized[0].title, "Valid");
+    }
+
+    #[test]
+    fn normalize_uses_url_as_title_when_empty() {
+        let normalized = normalize_search_results(
+            "google",
+            vec![RawSearchResult {
+                title: Some("   ".to_string()),
+                url: Some("https://fallback-title.com".to_string()),
+                snippet: None,
+            }],
+            10,
+        );
+        assert_eq!(normalized[0].title, "https://fallback-title.com");
+    }
+
+    #[test]
+    fn normalize_respects_count_limit() {
+        let raw: Vec<RawSearchResult> = (0..10)
+            .map(|i| RawSearchResult {
+                title: Some(format!("Result {i}")),
+                url: Some(format!("https://example{i}.com")),
+                snippet: None,
+            })
+            .collect();
+
+        let normalized = normalize_search_results("google", raw, 3);
+        assert_eq!(normalized.len(), 3);
+    }
+
+    #[test]
+    fn normalize_decodes_google_redirects() {
+        let normalized = normalize_search_results(
+            "google",
+            vec![RawSearchResult {
+                title: Some("Test".to_string()),
+                url: Some(
+                    "https://www.google.com/url?q=https://real-result.com/page&sa=U"
+                        .to_string(),
+                ),
+                snippet: None,
+            }],
+            10,
+        );
+        assert_eq!(normalized[0].url, "https://real-result.com/page");
+    }
+
+    #[test]
+    fn normalize_deduplicates_after_redirect_decode() {
+        // Two raw results that both decode to the same URL after DDG redirect decode
+        let normalized = normalize_search_results(
+            "duckduckgo",
+            vec![
+                RawSearchResult {
+                    title: Some("DDG Redirect".to_string()),
+                    url: Some(
+                        "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fsame.com".to_string(),
+                    ),
+                    snippet: None,
+                },
+                RawSearchResult {
+                    title: Some("Direct".to_string()),
+                    url: Some("https://same.com".to_string()),
+                    snippet: None,
+                },
+            ],
+            10,
+        );
+        assert_eq!(normalized.len(), 1);
+    }
+
+    #[test]
+    fn normalize_handles_whitespace_in_fields() {
+        let normalized = normalize_search_results(
+            "google",
+            vec![RawSearchResult {
+                title: Some("  Spaced Title  ".to_string()),
+                url: Some("  https://example.com  ".to_string()),
+                snippet: Some("  Spaced snippet  ".to_string()),
+            }],
+            10,
+        );
+        assert_eq!(normalized[0].title, "Spaced Title");
+        assert_eq!(normalized[0].url, "https://example.com");
+        assert_eq!(normalized[0].snippet, "Spaced snippet");
+    }
+
+    #[test]
+    fn normalize_skips_decoded_non_http_urls() {
+        // A DDG redirect that decodes to a non-http URL (e.g., javascript:)
+        let normalized = normalize_search_results(
+            "duckduckgo",
+            vec![RawSearchResult {
+                title: Some("Bad".to_string()),
+                url: Some(
+                    "https://duckduckgo.com/l/?uddg=javascript%3Aalert(1)".to_string(),
+                ),
+                snippet: None,
+            }],
+            10,
+        );
+        assert!(normalized.is_empty());
+    }
 }
