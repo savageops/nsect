@@ -13,7 +13,7 @@
  * boundary.
  *
  * Mode precedence (highest wins):
- *   1. INSECT_HOSTED=1            -> hosted (explicit operator opt-in)
+ *   1. NSECT_HOSTED=1            -> hosted (explicit operator opt-in)
  *   2. NODE_ENV=production        -> hosted (safety: prod cannot run keyless)
  *   3. (otherwise)                -> local
  */
@@ -47,7 +47,7 @@ const DEFAULT_PORT = 3000;
  * @returns {RuntimeMode}
  */
 export function resolveMode(env = process.env) {
-  const hostedFlag = String(env.INSECT_HOSTED ?? "").trim().toLowerCase();
+  const hostedFlag = String(env.NSECT_HOSTED ?? "").trim().toLowerCase();
   if (hostedFlag === "1" || hostedFlag === "true" || hostedFlag === "yes") {
     return "hosted";
   }
@@ -77,7 +77,7 @@ function resolveAdminKey(env, mode) {
     // Fail-fast: hosted mode without an admin secret is a misconfiguration that
     // the operator must fix. Surfacing it at startup beats a silent default.
     throw new Error(
-      "ADMIN_KEY is required in hosted mode (INSECT_HOSTED=1 or NODE_ENV=production). " +
+      "ADMIN_KEY is required in hosted mode (NSECT_HOSTED=1 or NODE_ENV=production). " +
         "Set a strong secret before starting the server.",
     );
   }
@@ -85,7 +85,7 @@ function resolveAdminKey(env, mode) {
 }
 
 function resolveDbPath(env) {
-  return String(env.INSECT_DB_PATH ?? "").trim() || DEFAULT_DB_PATH;
+  return String(env.NSECT_DB_PATH ?? "").trim() || DEFAULT_DB_PATH;
 }
 
 /**
@@ -96,14 +96,14 @@ function resolveDbPath(env) {
  * @param {NodeJS.ProcessEnv} env
  */
 function resolveSolverConfig(env) {
-  const apiKey = String(env.INSECT_SOLVER_API_KEY ?? "").trim();
+  const apiKey = String(env.NSECT_SOLVER_API_KEY ?? "").trim();
   if (!apiKey) return Object.freeze({ enabled: false });
   return Object.freeze({
     enabled: true,
-    provider: String(env.INSECT_SOLVER_PROVIDER ?? "capsolver").trim(),
+    provider: String(env.NSECT_SOLVER_PROVIDER ?? "capsolver").trim(),
     apiKey,
-    timeout: Number(env.INSECT_SOLVER_TIMEOUT ?? 60),
-    kinds: String(env.INSECT_SOLVER_KINDS ?? "cloudflare_turnstile,cloudflare,hcaptcha,recaptcha")
+    timeout: Number(env.NSECT_SOLVER_TIMEOUT ?? 60),
+    kinds: String(env.NSECT_SOLVER_KINDS ?? "cloudflare_turnstile,cloudflare,hcaptcha,recaptcha")
       .split(",")
       .map((k) => k.trim())
       .filter(Boolean),

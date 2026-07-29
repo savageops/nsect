@@ -6,7 +6,7 @@ product-specific decisions that are not derivable from the generic doctrine.
 
 ## What This Product Is
 
-`nsect` (published as `insect`) is programmable web-retrieval infrastructure:
+`nsect` (published as `@nsect/cli` on npm) is programmable web-retrieval infrastructure:
 a headless-browser engine for page extraction and multi-engine SERP fallback,
 plus a resilient YouTube-transcript adapter chain. It runs in two parallel
 runtimes — JavaScript (Node/Express) and Rust (axum) — that mirror each other
@@ -89,7 +89,7 @@ existing callers unless they configure the new env vars.
   bundled Chromium that rejects the CDP param.
 - **Real Chrome executablePath** — prefers a stable Chrome install over the
   bundled Chromium-for-Testing (whose TLS JA3 matches no real Chrome release).
-  Override with `INSECT_USE_BUNDLED_CHROME=1`.
+  Override with `NSECT_USE_BUNDLED_CHROME=1`.
 - **Deleted the self-inflicted `navigator.webdriver` leak** — the manual
   `defineProperty` getter returned a JS function source, not `[native code]`,
   which was itself a detection vector. The stealth plugin handles webdriver.
@@ -113,7 +113,7 @@ existing callers unless they configure the new env vars.
   kind is eligible, it solves; otherwise fails honestly as before.
 - **PX "press and hold" is NOT API-solvable** — documented boundary. The path
   is proxy + fingerprint (which the stealth layer provides), not a solver call.
-- Activation: `INSECT_SOLVER_API_KEY` env var. No key = solver disabled, no
+- Activation: `NSECT_SOLVER_API_KEY` env var. No key = solver disabled, no
   behavior change.
 
 ### Honest residuals (architectural ceilings, documented)
@@ -134,7 +134,7 @@ the engine runs keyless, unqueued, and ungated.
 
 | | Local mode | Hosted mode |
 |---|---|---|
-| **Trigger** | default | `INSECT_HOSTED=1` OR `NODE_ENV=production` |
+| **Trigger** | default | `NSECT_HOSTED=1` OR `NODE_ENV=production` |
 | **Engine/transcript** | no auth, no limits | API key + rate limit + 6s search cooldown |
 | **/api/keys/** | 404 (disabled) | admin auth + per-IP limiter |
 | **/health** | liveness only | liveness only |
@@ -143,7 +143,7 @@ the engine runs keyless, unqueued, and ungated.
 
 **Config owner:** `server/core/config.js` (JS) and `rust/src/config.rs` (Rust)
 are the single readers of `process.env`/`getenv`. No other module reads env
-directly. Mode precedence: `INSECT_HOSTED` > `NODE_ENV=production` > local.
+directly. Mode precedence: `NSECT_HOSTED` > `NODE_ENV=production` > local.
 
 **Safety invariant:** `NODE_ENV=production` *always* implies hosted mode. You
 cannot run a production deploy keyless by accident — the config owner
@@ -205,7 +205,7 @@ fail-fasts at startup if `ADMIN_KEY` is empty in hosted mode.
 node api.js
 
 # Hosted mode — requires ADMIN_KEY
-INSECT_HOSTED=1 ADMIN_KEY="your-strong-secret" node api.js
+NSECT_HOSTED=1 ADMIN_KEY="your-strong-secret" node api.js
 
 # Create a key (hosted only)
 bash scripts/create-api-key.sh --admin-key "your-strong-secret" --label prod
