@@ -29,6 +29,30 @@ const DEFAULT_PIPED_INSTANCES = Object.freeze([
   "https://pipedapi.aeong.one",
 ]);
 
+/**
+ * Process-level circuit breaker for dead third-party instances. When an
+ * Invidious/Piped instance fails, it's marked down for INSTANCE_COOLDOWN_MS
+ * so subsequent requests skip it instead of burning a full timeout per dead
+ * instance. Without this, 3 dead instances × 20s timeout = 60s wasted per
+ * request before falling through to yt-dlp.
+ */
+const INSTANCE_COOLDOWN_MS = 5 * 60 * 1000;
+const downInstances = new Map();
+
+function isInstanceDown(url) {
+  const expiry = downInstances.get(url);
+  if (!expiry) return false;
+  if (Date.now() > expiry) {
+    downInstances.delete(url);
+    return false;
+  }
+  return true;
+}
+
+function markInstanceDown(url) {
+  downInstances.set(url, Date.now() + INSTANCE_COOLDOWN_MS);
+}
+
 function parseListFromEnv(value) {
   if (!value || typeof value !== "string") return null;
   const list = value
@@ -658,9 +682,13 @@ function extractInnertubeConfig(html) {
   const keyMatch = html.match(/"INNERTUBE_API_KEY":"([^"]+)"/);
   const versionMatch = html.match(/"INNERTUBE_CONTEXT_CLIENT_VERSION":"([^"]+)"/);
   if (!keyMatch?.[1]) return null;
+  // Fallback version: use a recent stable date-based version if the page doesn't
+  // expose one. YouTube may reject requests with very old client versions. The
+  // primary source is the regex match from the watch page; the fallback is only
+  // hit when YouTube changes their page structure and the regex misses.
   return {
     apiKey: keyMatch[1],
-    clientVersion: versionMatch?.[1] || "2.20240101.00.00",
+    clientVersion: versionMatch?.[1] || "2.20260701.00.00",
   };
 }
 
@@ -732,6 +760,9 @@ async function runInvidiousMethod(request, context) {
   let lastError = null;
 
   for (const instance of context.invidiousInstances) {
+    if (isInstanceDown(instance)) {
+      continue;
+    }
     try {
       const indexUrl = `${instance}/api/v1/captions/${request.videoId}`;
       const response = await fetchWithTimeout(context.fetchImpl, indexUrl, context.timeoutMs, {
@@ -770,17 +801,21 @@ async function runInvidiousMethod(request, context) {
         source: instance,
       };
     } catch (err) {
+      markInstanceDown(instance);
       lastError = err;
     }
   }
 
-  throw lastError || new Error("All Invidious instances failed");
+  throw lastError || new Error("All Invidious instances failed or on cooldown");
 }
 
 async function runPipedMethod(request, context) {
   let lastError = null;
 
   for (const instance of context.pipedInstances) {
+    if (isInstanceDown(instance)) {
+      continue;
+    }
     try {
       const streamsUrl = `${instance}/streams/${request.videoId}`;
       const response = await fetchWithTimeout(context.fetchImpl, streamsUrl, context.timeoutMs, {
@@ -813,11 +848,12 @@ async function runPipedMethod(request, context) {
         source: instance,
       };
     } catch (err) {
+      markInstanceDown(instance);
       lastError = err;
     }
   }
 
-  throw lastError || new Error("All Piped instances failed");
+  throw lastError || new Error("All Piped instances failed or on cooldown");
 }
 
 function collectYtDlpTracks(payload) {
@@ -850,6 +886,9 @@ async function runYtDlpMethod(request, context) {
     "--skip-download",
     "--dump-single-json",
     "--no-warnings",
+    "--no-playlist",
+    "--age-limit",
+    "99",
     request.url,
   ];
 
