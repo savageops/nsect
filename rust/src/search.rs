@@ -168,4 +168,128 @@ mod tests {
         );
         assert_eq!(decoded, "https://example.com");
     }
+
+    #[test]
+    fn decodes_google_redirects() {
+        let decoded = decode_search_result_url(
+            "google",
+            "https://www.google.com/url?q=https://example.com/page&sa=U",
+        );
+        assert_eq!(decoded, "https://example.com/page");
+    }
+
+    #[test]
+    fn passthrough_for_non_redirect_urls() {
+        let url = "https://example.com/direct";
+        assert_eq!(decode_search_result_url("google", url), url);
+        assert_eq!(decode_search_result_url("duckduckgo", url), url);
+        assert_eq!(decode_search_result_url("bing", url), url);
+    }
+
+    #[test]
+    fn normalize_defaults_when_none() {
+        let engines = normalize_search_engines(None).unwrap();
+        assert_eq!(engines, vec!["duckduckgo", "bing", "brave", "google"]);
+    }
+
+    #[test]
+    fn normalize_rejects_empty() {
+        assert!(normalize_search_engines(Some(vec![])).is_err());
+    }
+
+    #[test]
+    fn normalize_rejects_unknown_engine() {
+        let result = normalize_search_engines(Some(vec!["yahoo".to_string()]));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unsupported engine"));
+    }
+
+    #[test]
+    fn normalize_lowercases_and_trims() {
+        let engines = normalize_search_engines(Some(vec!["  DUCKDUCKGO  ".to_string()])).unwrap();
+        // google is always appended last
+        assert_eq!(engines, vec!["duckduckgo", "google"]);
+    }
+
+    #[test]
+    fn normalize_deduplicates() {
+        let engines = normalize_search_engines(Some(vec![
+            "bing".to_string(),
+            "bing".to_string(),
+        ]))
+        .unwrap();
+        // google is forced last, so dedup'd bing + appended google
+        assert_eq!(engines, vec!["bing", "google"]);
+    }
+
+    #[test]
+    fn build_url_for_each_engine() {
+        assert!(build_search_url("duckduckgo", "test query", 10).unwrap().contains("html.duckduckgo.com"));
+        assert!(build_search_url("bing", "test", 10).unwrap().contains("bing.com"));
+        assert!(build_search_url("brave", "test", 10).unwrap().contains("search.brave.com"));
+        assert!(build_search_url("google", "test", 10).unwrap().contains("google.com"));
+    }
+
+    #[test]
+    fn build_url_rejects_unknown_engine() {
+        assert!(build_search_url("yahoo", "test", 10).is_err());
+    }
+
+    #[test]
+    fn build_url_url_encodes_query() {
+        let url = build_search_url("google", "rust & wasm", 5).unwrap();
+        // The & should be encoded so it's not interpreted as a query param separator
+        assert!(!url.contains("& wasm"));
+    }
+
+    #[test]
+    fn search_engine_labels() {
+        assert_eq!(search_engine_label("duckduckgo"), "DuckDuckGo");
+        assert_eq!(search_engine_label("bing"), "Bing");
+        assert_eq!(search_engine_label("brave"), "Brave Search");
+        assert_eq!(search_engine_label("google"), "Google");
+        assert_eq!(search_engine_label("unknown"), "unknown");
+    }
+
+    #[test]
+    fn is_search_blocked_detects_captcha() {
+        assert!(is_search_blocked("google", "https://google.com", "", "please complete the captcha"));
+    }
+
+    #[test]
+    fn is_search_blocked_detects_google_sorry() {
+        assert!(is_search_blocked("google", "https://google.com/sorry/index", "", ""));
+    }
+
+    #[test]
+    fn is_search_blocked_detects_unusual_traffic() {
+        assert!(is_search_blocked("google", "", "", "Our systems have detected unusual traffic"));
+    }
+
+    #[test]
+    fn is_search_blocked_passes_clean_content() {
+        assert!(!is_search_blocked("duckduckgo", "https://duckduckgo.com", "Search Results", "Normal results page content"));
+    }
+
+    #[test]
+    fn is_search_blocked_case_insensitive() {
+        assert!(is_search_blocked("bing", "", "", "ACCESS DENIED"));
+        assert!(is_search_blocked("bing", "", "", "Security Check"));
+    }
+
+    #[test]
+    fn enforce_google_last_preserves_order() {
+        let result = enforce_google_last(vec!["brave".to_string(), "duckduckgo".to_string(), "google".to_string()]);
+        assert_eq!(result, vec!["brave", "duckduckgo", "google"]);
+    }
+
+    #[test]
+    fn enforce_google_last_deduplicates() {
+        let result = enforce_google_last(vec![
+            "google".to_string(),
+            "google".to_string(),
+            "bing".to_string(),
+        ]);
+        assert_eq!(result, vec!["bing", "google"]);
+    }
 }
