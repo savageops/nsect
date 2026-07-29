@@ -515,4 +515,239 @@ mod tests {
         .unwrap_err();
         assert!(error.message.contains("selector"));
     }
+
+    #[test]
+    fn defaults_strategy_to_auto() {
+        let normalized = normalize_engine_request(
+            EngineRequestInput {
+                url: Some("https://example.com".to_string()),
+                ..EngineRequestInput::default()
+            },
+            EngineNormalizationOptions {
+                allow_file_output: false,
+                allow_headful: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(normalized.strategy, "auto");
+    }
+
+    #[test]
+    fn maps_legacy_method_direct_to_fast() {
+        let normalized = normalize_engine_request(
+            EngineRequestInput {
+                url: Some("https://example.com".to_string()),
+                method: Some("direct".to_string()),
+                ..EngineRequestInput::default()
+            },
+            EngineNormalizationOptions {
+                allow_file_output: false,
+                allow_headful: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(normalized.strategy, "fast");
+    }
+
+    #[test]
+    fn maps_legacy_method_timed_to_patient() {
+        let normalized = normalize_engine_request(
+            EngineRequestInput {
+                url: Some("https://example.com".to_string()),
+                method: Some("timed".to_string()),
+                ..EngineRequestInput::default()
+            },
+            EngineNormalizationOptions {
+                allow_file_output: false,
+                allow_headful: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(normalized.strategy, "patient");
+    }
+
+    #[test]
+    fn accepts_strategy_directly() {
+        let normalized = normalize_engine_request(
+            EngineRequestInput {
+                url: Some("https://example.com".to_string()),
+                strategy: Some("patient".to_string()),
+                ..EngineRequestInput::default()
+            },
+            EngineNormalizationOptions {
+                allow_file_output: false,
+                allow_headful: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(normalized.strategy, "patient");
+    }
+
+    #[test]
+    fn rejects_unknown_strategy() {
+        let error = normalize_engine_request(
+            EngineRequestInput {
+                url: Some("https://example.com".to_string()),
+                strategy: Some("turbo".to_string()),
+                ..EngineRequestInput::default()
+            },
+            EngineNormalizationOptions {
+                allow_file_output: false,
+                allow_headful: false,
+            },
+        )
+        .unwrap_err();
+        assert!(error.message.contains("Unknown strategy"));
+        assert_eq!(error.field, "strategy");
+    }
+
+    #[test]
+    fn throws_on_missing_url_and_query() {
+        let error = normalize_engine_request(
+            EngineRequestInput::default(),
+            EngineNormalizationOptions {
+                allow_file_output: false,
+                allow_headful: false,
+            },
+        )
+        .unwrap_err();
+        assert!(error.message.contains("url") || error.message.contains("query"));
+    }
+
+    #[test]
+    fn throws_on_unknown_search_engine() {
+        let error = normalize_engine_request(
+            EngineRequestInput {
+                query: Some("test".to_string()),
+                search_engines: Some(StringListInput::One("yahoo".to_string())),
+                ..EngineRequestInput::default()
+            },
+            EngineNormalizationOptions {
+                allow_file_output: false,
+                allow_headful: false,
+            },
+        )
+        .unwrap_err();
+        assert!(error.message.contains("searchEngines"));
+    }
+
+    #[test]
+    fn forces_headless_when_headful_disallowed() {
+        let normalized = normalize_engine_request(
+            EngineRequestInput {
+                url: Some("https://example.com".to_string()),
+                no_headless: Some(true),
+                ..EngineRequestInput::default()
+            },
+            EngineNormalizationOptions {
+                allow_file_output: false,
+                allow_headful: false,
+            },
+        )
+        .unwrap();
+        assert!(normalized.headless);
+    }
+
+    #[test]
+    fn allows_headful_when_explicitly_enabled() {
+        let normalized = normalize_engine_request(
+            EngineRequestInput {
+                url: Some("https://example.com".to_string()),
+                no_headless: Some(true),
+                ..EngineRequestInput::default()
+            },
+            EngineNormalizationOptions {
+                allow_file_output: false,
+                allow_headful: true,
+            },
+        )
+        .unwrap();
+        assert!(!normalized.headless);
+    }
+
+    #[test]
+    fn rejects_file_output_in_api_mode() {
+        let error = normalize_engine_request(
+            EngineRequestInput {
+                url: Some("https://example.com".to_string()),
+                screenshot: Some("capture.png".to_string()),
+                ..EngineRequestInput::default()
+            },
+            EngineNormalizationOptions {
+                allow_file_output: false,
+                allow_headful: false,
+            },
+        )
+        .unwrap_err();
+        assert!(error.message.contains("screenshot"));
+    }
+
+    #[test]
+    fn accepts_render_wait_and_challenge_timeout() {
+        let normalized = normalize_engine_request(
+            EngineRequestInput {
+                url: Some("https://example.com".to_string()),
+                render_wait: Some(5),
+                challenge_timeout: Some(30),
+                bypass_challenges: Some(true),
+                ..EngineRequestInput::default()
+            },
+            EngineNormalizationOptions {
+                allow_file_output: false,
+                allow_headful: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(normalized.render_wait, 5);
+        assert_eq!(normalized.challenge_timeout, 30);
+        assert!(normalized.bypass_challenges);
+    }
+
+    #[test]
+    fn query_alias_unified_with_google() {
+        let normalized = normalize_engine_request(
+            EngineRequestInput {
+                google: Some("test query".to_string()),
+                ..EngineRequestInput::default()
+            },
+            EngineNormalizationOptions {
+                allow_file_output: false,
+                allow_headful: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(normalized.query.as_deref(), Some("test query"));
+    }
+
+    #[test]
+    fn defaults_max_results_to_10() {
+        let normalized = normalize_engine_request(
+            EngineRequestInput {
+                query: Some("test".to_string()),
+                ..EngineRequestInput::default()
+            },
+            EngineNormalizationOptions {
+                allow_file_output: false,
+                allow_headful: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(normalized.max_results, 10);
+    }
+
+    #[test]
+    fn solver_config_defaults_to_none() {
+        let normalized = normalize_engine_request(
+            EngineRequestInput {
+                url: Some("https://example.com".to_string()),
+                ..EngineRequestInput::default()
+            },
+            EngineNormalizationOptions {
+                allow_file_output: false,
+                allow_headful: false,
+            },
+        )
+        .unwrap();
+        assert!(normalized.solver_config.is_none());
+    }
 }

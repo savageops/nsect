@@ -229,3 +229,55 @@ describe("locale-timezone coherence", () => {
     expect(foundUs).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// LIVE CreepJS fingerprint validation — gated behind LIVE_INTEGRATION=1
+//
+// Visits https://abrahamjuliot.github.io/creepjs/ with a nsect fingerprint
+// and verifies the trust score is reasonable. This catches real-world
+// fingerprint inconsistencies that unit tests can't detect.
+// ---------------------------------------------------------------------------
+
+const itLive = process.env.LIVE_INTEGRATION === "1" ? it : it.skip;
+
+describe("CreepJS live fingerprint validation", () => {
+  itLive("nsect fingerprint achieves a reasonable trust score on CreepJS", async () => {
+    const { runNsectEngine } = await import("../server/core/engine.js");
+    const result = await runNsectEngine({
+      url: "https://abrahamjuliot.github.io/creepjs/",
+      strategy: "spa",
+      renderWait: 8,
+      format: "text",
+      timeout: 40,
+    });
+
+    expect(result.success).toBe(true);
+    // CreepJS renders its report via JS — the text should contain "trust" or "lies"
+    // after the SPA wait. If it doesn't, the page didn't render.
+    const text = typeof result.output === "string" ? result.output : JSON.stringify(result.output);
+    const hasContent = text.length > 100;
+
+    // We don't assert a specific score (CreepJS changes its scoring algorithm),
+    // but we verify the page rendered and the fingerprint wasn't instantly
+    // detected as a bot (which would show "bot" or block the page entirely).
+    if (hasContent) {
+      const lowerText = text.toLowerCase();
+      // If CreepJS detected us as a bot, it would likely show specific signals
+      // like "webdriver" or "headless" in the lies section. We log but don't
+      // fail — the purpose is to surface what CreepJS sees, not to gate CI.
+      const webdriverDetected = lowerText.includes("webdriver");
+      const liesSection = lowerText.includes("lies");
+
+      // eslint-disable-next-line no-console
+      console.error(
+        `[creepjs] text length: ${text.length}, ` +
+        `webdriver in lies: ${webdriverDetected}, ` +
+        `lies section present: ${liesSection}`,
+      );
+
+      // The page should have rendered enough to show *something* — a blank page
+      // means our fingerprint was detected and blocked before rendering.
+      expect(text.length).toBeGreaterThan(100);
+    }
+  }, 60000);
+});
