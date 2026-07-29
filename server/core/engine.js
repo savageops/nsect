@@ -23,6 +23,7 @@ import {
 } from "./challenge.js";
 import { extractWithCascade } from "./extractor.js";
 import { attemptSolve, isSolverEligible } from "./solver.js";
+import { logEvent } from "../observability/logging.js";
 
 // Use the rebrowser-patched puppeteer-core instead of stock puppeteer-core.
 // rebrowser-patches fixes the Runtime.enable CDP leak — the #1 DataDome
@@ -120,8 +121,14 @@ async function injectFingerprint(page, fp) {
   // and Intl APIs uniformly.
   try {
     await page.emulateTimezone(fp.timezone);
-  } catch {
-    // Some Chromium builds reject certain timezone strings — best-effort.
+  } catch (tzErr) {
+    // Some Chromium builds reject certain timezone strings. Log so operators
+    // can detect when timezone spoofing isn't working — the fingerprint
+    // metadata will claim a timezone the browser isn't actually using.
+    logEvent("fingerprint.timezone_override_failed", {
+      timezone: fp.timezone,
+      error: tzErr.message?.substring(0, 100),
+    });
   }
 
   await page.evaluateOnNewDocument((f) => {
