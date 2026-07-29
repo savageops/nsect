@@ -252,6 +252,11 @@ server.tool(
     if (!params.url && !params.video_id) {
       return toMcpError("Either 'url' or 'video_id' is required.");
     }
+    // Validate YouTube URL — a non-YouTube URL would fail at the backend with
+    // an opaque error. Give the caller a clear message instead.
+    if (params.url && !isYouTubeUrl(params.url)) {
+      return toMcpError("'url' must be a YouTube URL (youtube.com, youtu.be). Use the 'fetch' tool for non-YouTube pages.");
+    }
 
     const result = await apiClient.postJson(YOUTUBE_TRANSCRIPT_API_PATH, {
       url: params.url,
