@@ -179,3 +179,104 @@ describe("formatGoogleResults()", () => {
     expect(out).toHaveLength(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Edge cases: htmlToMarkdown robustness
+// ---------------------------------------------------------------------------
+
+describe("htmlToMarkdown() edge cases", () => {
+  it("handles empty string input", () => {
+    expect(htmlToMarkdown("")).toBe("");
+  });
+
+  it("handles plain text with no HTML tags", () => {
+    expect(htmlToMarkdown("Just plain text")).toBe("Just plain text");
+  });
+
+  it("handles nested emphasis tags", () => {
+    const result = htmlToMarkdown("<strong><em>bold italic</em></strong>");
+    expect(result).toContain("**");
+    expect(result).toContain("*bold italic*");
+  });
+
+  it("handles special characters in URLs", () => {
+    const result = htmlToMarkdown('<a href="https://example.com/?a=1&b=2">Link</a>');
+    expect(result).toContain("https://example.com/?a=1&b=2");
+  });
+
+  it("handles self-closing tags without spaces", () => {
+    const result = htmlToMarkdown("line1<br>line2");
+    expect(result).toContain("line1\nline2");
+  });
+
+  it("handles deeply nested div structures", () => {
+    const result = htmlToMarkdown("<div><div><div><p>Deep text</p></div></div></div>");
+    expect(result).toContain("Deep text");
+    // All div tags should be stripped
+    expect(result).not.toContain("<div>");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatOutput() edge cases — new fields and preference paths
+// ---------------------------------------------------------------------------
+
+describe("formatOutput() edge cases", () => {
+  it("markdown format prefers data.markdown over htmlToMarkdown(html)", () => {
+    const data = {
+      title: "Test",
+      url: "https://example.com",
+      text: "raw text",
+      html: "<p>raw html</p>",
+      markdown: "# Pre-rendered Markdown\n\nFrom defuddle.",
+    };
+    // Should return the pre-rendered markdown, NOT htmlToMarkdown(html)
+    expect(formatOutput(data, "markdown")).toBe("# Pre-rendered Markdown\n\nFrom defuddle.");
+  });
+
+  it("markdown format falls back to htmlToMarkdown when data.markdown is empty", () => {
+    const data = {
+      title: "Test",
+      url: "https://example.com",
+      text: "raw text",
+      html: "<h2>Generated</h2>",
+      markdown: "",
+    };
+    const result = formatOutput(data, "markdown");
+    expect(result).toContain("## Generated");
+  });
+
+  it("json format includes author, published, schemaOrg when present", () => {
+    const data = {
+      title: "Test",
+      url: "https://example.com",
+      text: "content",
+      html: "<p>content</p>",
+      links: [],
+      meta: {},
+      author: "Jane Doe",
+      published: "2024-01-15",
+      schemaOrg: [{ "@type": "Article" }],
+    };
+    const result = formatOutput(data, "json");
+    expect(result.author).toBe("Jane Doe");
+    expect(result.published).toBe("2024-01-15");
+    expect(result.schemaOrg).toEqual([{ "@type": "Article" }]);
+    expect(result.markdown).toBeUndefined(); // not provided in this data
+  });
+
+  it("json format omits author/published/schemaOrg when absent", () => {
+    const data = {
+      title: "Test",
+      url: "https://example.com",
+      text: "content",
+      html: "<p>content</p>",
+      links: [],
+      meta: {},
+    };
+    const result = formatOutput(data, "json");
+    expect(result).not.toHaveProperty("author");
+    expect(result).not.toHaveProperty("published");
+    expect(result).not.toHaveProperty("schemaOrg");
+  });
+});

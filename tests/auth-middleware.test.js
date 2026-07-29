@@ -321,4 +321,86 @@ describe("adminRateLimiter — caps per-IP admin requests", () => {
     adminRateLimiter(reqB, resB, vi.fn());
     expect(resB.statusCode).toBe(200);
   });
+
+  it("falls back to req.socket.remoteAddress when req.ip is undefined", () => {
+    resetAdminRateLimiterForTests();
+    const req = { ip: undefined, socket: { remoteAddress: "192.168.1.100" } };
+    const res = mockRes();
+    adminRateLimiter(req, res, vi.fn());
+    expect(res.statusCode).toBe(200);
+    // Hit it 9 more times (10 total = at the limit)
+    for (let i = 0; i < 9; i++) {
+      adminRateLimiter(req, mockRes(), vi.fn());
+    }
+    // 11th should fail
+    const overRes = mockRes();
+    adminRateLimiter(req, overRes, vi.fn());
+    expect(overRes.statusCode).toBe(429);
+  });
+
+  it("defaults to 'unknown' when both req.ip and req.socket are missing", () => {
+    resetAdminRateLimiterForTests();
+    const req = {};
+    const res = mockRes();
+    adminRateLimiter(req, res, vi.fn());
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("handles IPv6 addresses as distinct IPs", () => {
+    resetAdminRateLimiterForTests();
+    const reqV6 = { ip: "::1" };
+    const reqV4 = { ip: "127.0.0.1" };
+    // Exhaust ::1
+    for (let i = 0; i < 10; i++) {
+      adminRateLimiter(reqV6, mockRes(), vi.fn());
+    }
+    // IPv4 is unaffected
+    const resV4 = mockRes();
+    adminRateLimiter(reqV4, resV4, vi.fn());
+    expect(resV4.statusCode).toBe(200);
+  });
+
+  it("returns a 429 with retryAfter in the body", () => {
+    resetAdminRateLimiterForTests();
+    const req = { ip: "203.0.113.1" };
+    for (let i = 0; i < 10; i++) {
+      adminRateLimiter(req, mockRes(), vi.fn());
+    }
+    const overRes = mockRes();
+    adminRateLimiter(req, overRes, vi.fn());
+    expect(overRes.statusCode).toBe(429);
+    expect(overRes.body.code).toBe("admin_rate_limited");
+    expect(typeof overRes.body.retryAfter).toBe("number");
+    expect(overRes.body.retryAfter).toBeGreaterThan(0);
+  });
+});
+
+describe("adminAuth edge cases", () => {
+  it("rejects when adminKey is empty string", () => {
+    const middleware = adminAuth("real-secret");
+    const req = { headers: { "x-admin-key": "" } };
+    const res = mockRes();
+    const next = vi.fn();
+    middleware(req, res, next);
+    expect(res.statusCode).toBe(403);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("rejects when x-admin-key header is missing entirely", () => {
+    const middleware = adminAuth("real-secret");
+    const req = { headers: {} };
+    const res = mockRes();
+    const next = vi.fn();
+    middleware(req, res, next);
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("accepts the correct key with whitespace padding", () => {
+    const middleware = adminAuth("real-secret");
+    const req = { headers: { "x-admin-key": "  real-secret  " } };
+    const res = mockRes();
+    const next = vi.fn();
+    middleware(req, res, next);
+    expect(next).toHaveBeenCalled();
+  });
 });
