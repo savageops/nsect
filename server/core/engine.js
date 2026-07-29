@@ -112,6 +112,18 @@ async function buildBrowser(opts, fp) {
 }
 
 async function injectFingerprint(page, fp) {
+  // Set timezone at the V8 engine level via CDP — this is the proper way to
+  // spoof timezone. The old prototype hack (Date.prototype.getTimezoneOffset)
+  // only affected getTimezoneOffset() and left Intl.DateTimeFormat reporting
+  // the real timezone, an inconsistency anti-bots specifically probe. The CDP
+  // Emulation.setTimezoneOverride handles DST correctly and covers all Date
+  // and Intl APIs uniformly.
+  try {
+    await page.emulateTimezone(fp.timezone);
+  } catch {
+    // Some Chromium builds reject certain timezone strings — best-effort.
+  }
+
   await page.evaluateOnNewDocument((f) => {
     Object.defineProperty(navigator, "platform", { get: () => f.platform });
     Object.defineProperty(navigator, "language", { get: () => f.locale });
@@ -126,17 +138,6 @@ async function injectFingerprint(page, fp) {
     Object.defineProperty(screen, "availHeight", { get: () => f.screen.availHeight });
     Object.defineProperty(screen, "colorDepth", { get: () => f.screen.colorDepth });
     Object.defineProperty(screen, "pixelDepth", { get: () => f.screen.pixelDepth });
-
-    const tzOffsets = {
-      "America/New_York": 300, "America/Chicago": 360,
-      "America/Denver": 420, "America/Los_Angeles": 480,
-      "America/Toronto": 300, "America/Vancouver": 480,
-      "Europe/London": 0, "Europe/Dublin": 0,
-      "Australia/Sydney": -660, "Pacific/Auckland": -780,
-    };
-    Object.defineProperty(Date.prototype, "getTimezoneOffset", {
-      get: () => () => tzOffsets[f.timezone] ?? 0,
-    });
 
     const origGetParam = WebGLRenderingContext.prototype.getParameter;
     WebGLRenderingContext.prototype.getParameter = function (param) {

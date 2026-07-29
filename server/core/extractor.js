@@ -28,13 +28,13 @@ import { logEvent } from "../observability/logging.js";
 export async function extractWithCascade(page, options = {}) {
   const { verbose = false, noiseSelectors = [] } = options;
 
-  // Grab the rendered HTML once — used by both defuddle and the fallbacks.
-  const html = await page.content();
-  const url = page.url();
+  // Grab EVERYTHING from the DOM in a single atomic evaluate() call. This
+  // eliminates the TOCTOU race where separate page.content() + page.evaluate()
+  // calls could see different DOM states on a fast-updating SPA. One round-trip
+  // also reduces IPC overhead vs 4 separate evaluate calls.
+  const { html, links, meta, schemaOrg } = await page.evaluate(() => {
+    const pageHtml = document.documentElement.outerHTML;
 
-  // Always extract links + meta via page.evaluate (defuddle doesn't surface
-  // the full link list in the shape callers want).
-  const { links, meta } = await page.evaluate(() => {
     const linkList = Array.from(document.querySelectorAll("a[href]"))
       .map((a) => ({
         text: (a.textContent || "").trim().substring(0, 200),
@@ -49,18 +49,17 @@ export async function extractWithCascade(page, options = {}) {
       if (key && val) metaMap[key] = val;
     });
 
-    return { links: linkList, meta: metaMap };
-  });
-
-  // JSON-LD (schema.org structured data) — ~90% of sites use it; carries
-  // datePublished, author, articleBody, product data that RAG pipelines want.
-  const schemaOrg = await page.evaluate(() => {
-    return Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
+    // JSON-LD (schema.org structured data) — ~90% of sites use it.
+    const jsonLd = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
       .map((s) => {
         try { return JSON.parse(s.textContent); } catch { return null; }
       })
       .filter(Boolean);
-  }).catch(() => []);
+
+    return { html: pageHtml, links: linkList, meta: metaMap, schemaOrg: jsonLd };
+  });
+
+  const url = page.url();
 
   // Tier 1: defuddle (DOM-scoring main-content extraction).
   try {
