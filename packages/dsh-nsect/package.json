@@ -1,0 +1,53 @@
+{
+  "name": "dsh-nsect",
+  "version": "1.0.0",
+  "description": "Keyless WebSearchProvider for the DeepSeek Harness web seam — runs the model-facing web_search tool through the local nsect CLI (stealth browser, multi-engine search). No API key, no account.",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness-plugin",
+    "deepseek-harness",
+    "web-search",
+    "search-provider",
+    "nsect",
+    "keyless"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/savageops/nsect.git",
+    "directory": "packages/dsh-nsect"
+  },
+  "bugs": {
+    "url": "https://github.com/savageops/nsect/issues"
+  },
+  "homepage": "https://github.com/savageops/nsect#readme",
+  "dependencies": {
+    "@nsect/cli": "^1.0.0",
+    "schemastery": "^3.18.0"
+  },
+  "dsh": {
+    "engines": {
+      "dsh": ">=0.1.1-rc.1"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

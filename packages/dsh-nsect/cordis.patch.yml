@@ -1,0 +1,23 @@
+# dsh-nsect bundle layer.
+#
+# Mounts the provider row and points the web seam at it, so installing this
+# package as a profile bundle is the only step: no API key, no separate nsect
+# install (the bundled @nsect/cli dependency serves the engine when no legacy
+# ~/.dsh/tools/nsect install exists).
+#
+# Layering: bundle patches compose before the user patch layer
+# (~/.dsh/profiles/<profile>/cordis.patch.yml), so a user row targeting the
+# same id — or a `web.searchProvider` override — always wins over this file.
+#
+# The loader entry id is `web-search-nsect`, kept byte-identical to the older
+# dsh-web-search-nsect package so existing user-patch rows (insert targets,
+# `disabled:` flags, plugin-toggle managed blocks) keep addressing it after an
+# upgrade. The search-provider registry id is `nsect` (see src/index.js).
+- insert:
+    - id: web-search-nsect
+      name: dsh-nsect
+- id: web
+  config:
+    searchProvider: nsect
+- id: web-search-nsect
+  disabled: false
